@@ -14,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Your Bot API Token
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAHsc62jeHjvrikkatWyqnDCSUlFkv4Qr6U")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAHjit-cHpp6mK7URQnYe7ZxV9qhnjHKJI4")
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
