@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Your Bot API Token directly added
+# Your Bot API Token
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAHsc62jeHjvrikkatWyqnDCSUlFkv4Qr6U")
 
 HEADERS = {
@@ -65,7 +65,7 @@ def get_pinterest_media(url):
     return None, None
 
 
-# Professional /start Command with Tutorial & FAQ
+# Professional /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = (
         "📌 **Welcome to Pinterest Downloader Bot!**\n\n"
@@ -91,7 +91,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_message, parse_mode="Markdown", disable_web_page_preview=True)
 
 
-# Handle user sent links
+# Main Link Processor (Downloads file locally first to prevent URL errors)
 async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
 
@@ -99,12 +99,12 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "pinterest.com" not in url and "pin.it" not in url:
         await update.message.reply_text(
             "⚠️ **Invalid Link!**\n"
-            "Please send a valid Pinterest URL (e.g., `https://pin.it/xxxxx` or `https://pinterest.com/pin/xxxxx`).",
+            "Please send a valid Pinterest URL (e.g., `https://pin.it/xxxxx`).",
             parse_mode="Markdown"
         )
         return
 
-    status_msg = await update.message.reply_text("⏳ **Processing your link... Please wait.**", parse_mode="Markdown")
+    status_msg = await update.message.reply_text("⏳ **Processing & Downloading media... Please wait.**", parse_mode="Markdown")
 
     try:
         media_url, media_type = get_pinterest_media(url)
@@ -118,18 +118,40 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         caption = "✨ **Downloaded via Pinterest Downloader Bot**"
+        
+        # Local file path setup
+        extension = "mp4" if media_type == 'video' else "jpg"
+        file_path = f"temp_media.{extension}"
 
-        if media_type == 'video':
-            await update.message.reply_video(video=media_url, caption=caption, parse_mode="Markdown")
-        elif media_type == 'image':
-            await update.message.reply_photo(photo=media_url, caption=caption, parse_mode="Markdown")
+        # Download file to local server
+        response = requests.get(media_url, headers=HEADERS, stream=True)
+        if response.status_code == 200:
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024):
+                    f.write(chunk)
+            
+            # Send file to Telegram user
+            with open(file_path, 'rb') as file:
+                if media_type == 'video':
+                    await update.message.reply_video(video=file, caption=caption, parse_mode="Markdown")
+                else:
+                    await update.message.reply_photo(photo=file, caption=caption, parse_mode="Markdown")
 
-        await status_msg.delete()
+            # Clean up local file after sending
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text("❌ **Error!** Could not fetch media content from Pinterest.", parse_mode="Markdown")
 
     except Exception as e:
         logger.error(f"Error in processing: {e}")
+        # Clean up in case of error
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
         await status_msg.edit_text(
-            "❌ **Error!** Something went wrong while downloading. Please try again later.",
+            "❌ **Error!** Something went wrong while downloading. Please try another link.",
             parse_mode="Markdown"
         )
 
