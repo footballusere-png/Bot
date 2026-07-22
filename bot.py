@@ -3,6 +3,7 @@ import re
 import logging
 import threading
 import base64
+import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
@@ -12,15 +13,19 @@ import yt_dlp
 import firebase_admin
 from firebase_admin import db
 
+# Logging setup
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Firebase Setup
+# --- CONFIGURATION ---
+ADMIN_ID = 7312906293  # 🎯 നിങ്ങളുടെ User ID ചേർത്തിട്ടുണ്ട്
 FIREBASE_DB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
 
+# Firebase setup
 def init_firebase():
     try:
         if not firebase_admin._apps:
@@ -29,7 +34,7 @@ def init_firebase():
     except Exception as e:
         logger.error(f"Firebase Init Error: {e}")
 
-# /start ചെയ്യുമ്പോൾ മാത്രം പശ്ചാത്തലത്തിൽ (Background-ൽ) സേവ് ചെയ്യുന്ന ഫംഗ്ഷൻ
+# Async Background User Saving
 def async_add_user(user_id, first_name):
     def save():
         try:
@@ -43,14 +48,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Pinterest Bot is Super Fast!")
+        self.wfile.write(b"Pinterest Bot with Ad Broadcast System is Running!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -120,7 +123,6 @@ def get_reply_markup():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    # /start അമർത്തുമ്പോൾ മാത്രം ബാക്ക്ഗ്രൗണ്ടിൽ ഡാറ്റ സേവ് ചെയ്യും (സ്പീഡിനെ ബാധിക്കില്ല)
     async_add_user(user.id, user.first_name)
 
     if context.args and len(context.args) > 0:
@@ -146,6 +148,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_reply_markup(),
         disable_web_page_preview=True
     )
+
+# 📢 BROADCAST COMMAND (നിങ്ങൾക്ക് പരസ്യങ്ങൾ അയക്കാൻ)
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text("⚠️ **പരസ്യമായി അയക്കേണ്ട Message/Photo/Video-യ്ക്ക് റിപ്ലൈ ആയി `/broadcast` എന്ന് അയക്കുക!**", parse_mode="Markdown")
+        return
+
+    status_msg = await update.message.reply_text("🚀 **Broadcast ആരംഭിക്കുന്നു...**")
+    
+    try:
+        ref = db.reference('users')
+        users_data = ref.get()
+
+        if not users_data:
+            await status_msg.edit_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
+            return
+
+        success = 0
+        failed = 0
+
+        for user_id in users_data.keys():
+            try:
+                await context.bot.copy_message(
+                    chat_id=int(user_id),
+                    from_chat_id=update.effective_chat.id,
+                    message_id=update.message.reply_to_message.message_id
+                )
+                success += 1
+                await asyncio.sleep(0.05)  # Telegram limits ഒഴിവാക്കാൻ
+            except Exception:
+                failed += 1
+
+        await status_msg.edit_text(
+            f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
+            f"🎯 വിജയിച്ചവ: `{success}`\n"
+            f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Broadcast Error: {e}")
+        await status_msg.edit_text("❌ Broadcast ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു.")
 
 async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
@@ -226,9 +272,10 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Super Fast Bot with Web/Firebase Tracking is running...")
+    print("Bot with Admin ID 7312906293 & Broadcast system is running...")
     app.run_polling()
 
 if __name__ == "__main__":
