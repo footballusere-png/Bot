@@ -4,6 +4,7 @@ import logging
 import threading
 import base64
 import asyncio
+import sqlite3
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
@@ -14,8 +15,6 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError, Forbidden
 import yt_dlp
-import firebase_admin
-from firebase_admin import db
 
 # Logging setup
 logging.basicConfig(
@@ -26,37 +25,66 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
 ADMIN_ID = 7312906293  # Admin Telegram ID
-FIREBASE_DB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
+DB_FILE = "bot_users.db"
 
 # Conversation States for Broadcast
 WAITING_FOR_BROADCAST_MSG, CONFIRM_BROADCAST = range(2)
 
-# Firebase setup
-def init_firebase():
+# --- SQLITE DATABASE FUNCTIONS ---
+def init_sqlite_db():
     try:
-        if not firebase_admin._apps:
-            options = {'databaseURL': FIREBASE_DB_URL}
-            firebase_admin.initialize_app(options=options)
-            logger.info("Firebase Realtime DB successfully connected!")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                first_name TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        logger.info("SQLite DB Initialized Successfully!")
     except Exception as e:
-        logger.error(f"Firebase Init Error: {e}")
+        logger.error(f"SQLite Init Error: {e}")
 
-# Async Background User Saving
-def async_add_user(user_id, first_name):
+def add_user_sqlite(user_id, first_name):
     def save():
         try:
-            ref = db.reference(f'users/{user_id}')
-            ref.set({'user_id': user_id, 'first_name': first_name or "User"})
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO users (user_id, first_name) 
+                VALUES (?, ?)
+            ''', (user_id, first_name or "User"))
+            conn.commit()
+            conn.close()
         except Exception as e:
-            logger.error(f"Firebase Save Error: {e}")
+            logger.error(f"SQLite Save Error: {e}")
     threading.Thread(target=save, daemon=True).start()
 
+def get_all_users_sqlite():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM users')
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+    except Exception as e:
+        logger.error(f"SQLite Fetch Error: {e}")
+        return []
+
+# --- DUMMY SERVER FOR RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Pinterest Bot is Active!")
+        self.wfile.write(b"Pinterest Bot with SQLite is Active!")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -131,7 +159,7 @@ def get_reply_markup():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    async_add_user(user.id, user.first_name)
+    add_user_sqlite(user.id, user.first_name)
 
     if context.args and len(context.args) > 0:
         encoded_url = context.args[0]
@@ -194,7 +222,6 @@ async def receive_broadcast_message(update: Update, context: ContextTypes.DEFAUL
     if update.effective_user.id != ADMIN_ID:
         return ConversationHandler.END
 
-    # Save details of the message to forward
     context.user_data['broadcast_chat_id'] = update.message.chat_id
     context.user_data['broadcast_msg_id'] = update.message.message_id
 
@@ -213,7 +240,7 @@ async def receive_broadcast_message(update: Update, context: ContextTypes.DEFAUL
     )
     return CONFIRM_BROADCAST
 
-# Step 2: Confirmation Handle ചെയ്യുക (Send or Cancel)
+# Step 2: Confirmation Handle ചെയ്യുക
 async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -224,40 +251,34 @@ async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DE
         msg_id = context.user_data.get('broadcast_msg_id')
         from_chat_id = context.user_data.get('broadcast_chat_id')
 
-        try:
-            ref = db.reference('users')
-            users_data = ref.get()
+        users = get_all_users_sqlite()
 
-            if not users_data:
-                await query.edit_message_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
-                return ConversationHandler.END
+        if not users:
+            await query.edit_message_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
+            return ConversationHandler.END
 
-            success = 0
-            failed = 0
+        success = 0
+        failed = 0
 
-            for user_id in users_data.keys():
-                try:
-                    await context.bot.copy_message(
-                        chat_id=int(user_id),
-                        from_chat_id=from_chat_id,
-                        message_id=msg_id
-                    )
-                    success += 1
-                    await asyncio.sleep(0.15)  # Telegram Rate Limit ഒഴിവാക്കാൻ
-                except Exception:
-                    failed += 1
-                    continue
+        for u_id in users:
+            try:
+                await context.bot.copy_message(
+                    chat_id=int(u_id),
+                    from_chat_id=from_chat_id,
+                    message_id=msg_id
+                )
+                success += 1
+                await asyncio.sleep(0.15)
+            except Exception:
+                failed += 1
+                continue
 
-            await query.edit_message_text(
-                f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
-                f"🎯 വിജയിച്ചവ: `{success}`\n"
-                f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Broadcast Error: {e}")
-            await query.edit_message_text("❌ Broadcast ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു.")
-
+        await query.edit_message_text(
+            f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
+            f"🎯 വിജയിച്ചവ: `{success}`\n"
+            f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
+            parse_mode="Markdown"
+        )
         return ConversationHandler.END
 
     elif query.data == "cancel_broadcast":
@@ -314,6 +335,9 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
             os.remove(file_path)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    add_user_sqlite(user.id, user.first_name)
+
     url = update.message.text.strip()
     chat_type = update.effective_chat.type
 
@@ -341,12 +365,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await process_media_download(update, context, url)
 
 def main():
-    init_firebase()
+    init_sqlite_db()
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Conversation Handler for Button Broadcast
     broadcast_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(admin_button_click, pattern="^start_broadcast_flow$")
@@ -363,6 +386,7 @@ def main():
             CommandHandler("cancel", cancel_broadcast),
             CallbackQueryHandler(handle_broadcast_confirmation, pattern="^cancel_broadcast$")
         ],
+        per_message=False
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -371,7 +395,7 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_button_click, pattern="^close_admin_panel$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is running seamlessly...")
+    print("Bot running with SQLite Database...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
