@@ -173,7 +173,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-# 📊 Admin /stats Command
+# 📊 Admin Users Count Command (/users, /count, /stats)
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id == ADMIN_ID:
@@ -274,7 +274,12 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    
+    # 💥 Admin count commands
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("users", stats))
+    app.add_handler(CommandHandler("count", stats))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot is running seamlessly...")
