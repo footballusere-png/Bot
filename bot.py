@@ -16,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Render-ൽ ഫ്രീയായി 24/7 റൺ ചെയ്യാനുള്ള Dummy Web Server
+# Render Dummy Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -42,7 +42,6 @@ def get_full_url(url):
         logger.error(f"URL expand error: {e}")
         return url
 
-# Direct Scraping Method
 def get_pinterest_media_direct(url):
     full_url = get_full_url(url)
     try:
@@ -52,7 +51,6 @@ def get_pinterest_media_direct(url):
 
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # 1. Video extraction
         video_tag = soup.find('video')
         if video_tag and video_tag.get('src'):
             video_url = video_tag['src'].replace('/hls/', '/736x/').replace('.m3u8', '.mp4')
@@ -62,7 +60,6 @@ def get_pinterest_media_direct(url):
         if meta_video and meta_video.get('content'):
             return meta_video['content'], 'video'
 
-        # 2. Image extraction
         meta_image = soup.find('meta', property='og:image')
         if meta_image and meta_image.get('content'):
             img_url = meta_image['content']
@@ -74,7 +71,6 @@ def get_pinterest_media_direct(url):
 
     return None, None
 
-# Updated yt-dlp Method
 def download_with_ytdlp(url):
     os.makedirs("downloads", exist_ok=True)
     ydl_opts = {
@@ -89,7 +85,6 @@ def download_with_ytdlp(url):
         filename = ydl.prepare_filename(info)
         return filename
 
-# നിങ്ങളും നൽകിയ അപ്‌ഡേറ്റഡ് ലിങ്കുകളോട് കൂടിയ Inline Buttons
 def get_reply_markup():
     keyboard = [
         [
@@ -102,7 +97,20 @@ def get_reply_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# Start Command handling (Deep Linking ഉൾപ്പെടെ)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ഗ്രൂപ്പിൽ നിന്ന് ബട്ടൺ ക്ലിക്ക് ചെയ്ത് വരുമ്പോൾ (Deep-link handling)
+    if context.args and len(context.args) > 0:
+        encoded_url = context.args[0]
+        # Base64 കൊണ്ട് എൻകോഡ് ചെയ്ത ലിങ്കിനെ ഡികോഡ് ചെയ്യുന്നു
+        import base64
+        try:
+            url = base64.b64decode(encoded_url.encode('utf-8')).decode('utf-8')
+            await process_media_download(update, context, url)
+            return
+        except Exception as e:
+            logger.error(f"Base64 decode error: {e}")
+
     welcome_text = (
         "✨ **Welcome to Pinterest Downloader Pro!** ✨\n\n"
         "Send me any Pinterest link, and I will download high-quality **Videos & Photos** instantly!\n\n"
@@ -118,18 +126,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-
-    if "pinterest.com" not in url and "pin.it" not in url:
-        await update.message.reply_text("⚠️ **Please send a valid Pinterest URL.**", parse_mode="Markdown")
-        return
-
+# Media ഡൗൺലോഡ് ചെയ്യുന്ന ഫംഗ്ഷൻ
+async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
 
     file_path = None
     try:
-        # Method 1: Direct Scraping
         media_url, media_type = get_pinterest_media_direct(url)
 
         if media_url:
@@ -143,7 +145,6 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     for chunk in res.iter_content(chunk_size=1024):
                         f.write(chunk)
 
-        # Method 2: yt-dlp Fallback
         if not file_path or not os.path.exists(file_path):
             try:
                 full_url = get_full_url(url)
@@ -152,7 +153,6 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as yt_err:
                 logger.error(f"yt-dlp error: {yt_err}")
 
-        # Send File to User
         if file_path and os.path.exists(file_path):
             caption = "🚀 **Downloaded via Pinterest Downloader Bot**\n\nJoin @moviestore_imdb_updates for more!"
             with open(file_path, 'rb') as file:
@@ -172,15 +172,49 @@ async def process_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
+# Text Messages കൈകാര്യം ചെയ്യുന്നു (Group vs Private)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+    chat_type = update.effective_chat.type
+
+    if "pinterest.com" not in url and "pin.it" not in url:
+        if chat_type == 'private':
+            await update.message.reply_text("⚠️ **Please send a valid Pinterest URL.**", parse_mode="Markdown")
+        return
+
+    # 1. മെസ്സേജ് ഗ്രൂപ്പിൽ നിന്നാണെങ്കിൽ (Group/Supergroup)
+    if chat_type in ['group', 'supergroup']:
+        import base64
+        # URL ടെലഗ്രാം ലിങ്ക് സേഫ് ആക്കാൻ Base64 ചെയ്യുന്നു
+        encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
+        
+        bot_username = (await context.bot.get_me()).username
+        pm_link = f"https://t.me/{bot_username}?start={encoded_url}"
+
+        group_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📥 Get Your Media (Private Chat)", url=pm_link)]
+        ])
+
+        await update.message.reply_text(
+            f"👋 Hello {update.effective_user.first_name}!\n\n"
+            "Click the button below to get your downloaded photo/video in private chat! 👇",
+            reply_markup=group_keyboard,
+            reply_to_message_id=update.message.message_id
+        )
+
+    # 2. മെസ്സേജ് ബോട്ടിന്റെ Private PM-ൽ നിന്നാണെങ്കിൽ
+    else:
+        await process_media_download(update, context, url)
+
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_link))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is running...")
+    print("Bot is running with Group Redirection feature...")
     app.run_polling()
 
 if __name__ == "__main__":
