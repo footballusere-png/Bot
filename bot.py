@@ -95,8 +95,8 @@ def download_with_ytdlp(url):
 def get_reply_markup():
     keyboard = [
         [
-            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/telegram"),
-            InlineKeyboardButton("💬 Support", url="https://t.me/telegram")
+            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/moviestore_imdb_updates"),
+            InlineKeyboardButton("💬 Support", url="https://t.me/moviestoreimdb")
         ],
         [
             InlineKeyboardButton("➕ Share / Add Bot", url="https://t.me/share/url?url=Try%20this%20awesome%20Pinterest%20Downloader%20Bot!")
