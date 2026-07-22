@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError, Forbidden, BlockedUser
+from telegram.error import TelegramError, Forbidden  # 🎯 BlockedUser ഇവിടെ ഒഴിവാക്കി
 import yt_dlp
 import firebase_admin
 from firebase_admin import db
@@ -36,7 +36,7 @@ def init_firebase():
     except Exception as e:
         logger.error(f"Firebase Init Error: {e}")
 
-# Async Background User Saving (സ്പീഡ് ലാഗ് ഒഴിവാക്കാൻ)
+# Async Background User Saving
 def async_add_user(user_id, first_name):
     def save():
         try:
@@ -185,10 +185,9 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message_id=update.message.reply_to_message.message_id
                 )
                 success += 1
-                # Telegram limits തടയാൻ 0.1 സെക്കന്റ് ഡിലേ ചേർക്കുന്നു
-                await asyncio.sleep(0.1)
-            except (Forbidden, BlockedUser):
-                # ബോട്ട് ബ്ലോക്ക് ചെയ്ത ആളുകൾ
+                await asyncio.sleep(0.1) # Safe delay
+            except Forbidden:
+                # ബോട്ട് ബ്ലോക്ക് ചെയ്തവർ അല്ലെങ്കിൽ ചാറ്റ് സ്റ്റോപ്പ് ചെയ്തവർ
                 failed += 1
             except TelegramError as te:
                 logger.error(f"Telegram error during broadcast to {user_id}: {te}")
@@ -292,7 +291,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot is running seamlessly...")
-    app.run_polling(drop_pending_updates=True) # ഡ്യൂപ്ലിക്കേറ്റ് റിക്വസ്റ്റുകൾ തടയാൻ
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
