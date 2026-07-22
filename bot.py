@@ -9,6 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.error import TelegramError, Forbidden, BlockedUser
 import yt_dlp
 import firebase_admin
 from firebase_admin import db
@@ -21,20 +22,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
-ADMIN_ID = 7312906293  # 🎯 നിങ്ങളുടെ User ID ചേർത്തിട്ടുണ്ട്
+ADMIN_ID = 7312906293  # നിങ്ങളുടെ Telegram User ID
 FIREBASE_DB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
 
-# Firebase setup
+# Firebase initialize
 def init_firebase():
     try:
         if not firebase_admin._apps:
             options = {'databaseURL': FIREBASE_DB_URL}
             firebase_admin.initialize_app(options=options)
+            logger.info("Firebase connected successfully!")
     except Exception as e:
         logger.error(f"Firebase Init Error: {e}")
 
-# Async Background User Saving
+# Async Background User Saving (സ്പീഡ് ലാഗ് ഒഴിവാക്കാൻ)
 def async_add_user(user_id, first_name):
     def save():
         try:
@@ -44,11 +46,12 @@ def async_add_user(user_id, first_name):
             logger.error(f"Firebase Save Error: {e}")
     threading.Thread(target=save, daemon=True).start()
 
+# Render 24/7 റൺ ചെയ്യാനുള്ള Dummy Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Pinterest Bot with Ad Broadcast System is Running!")
+        self.wfile.write(b"Pinterest Bot with Broadcast is Active!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -75,6 +78,7 @@ def get_pinterest_media_direct(url):
 
         soup = BeautifulSoup(res.text, 'html.parser')
         
+        # Video Extract
         video_tag = soup.find('video')
         if video_tag and video_tag.get('src'):
             video_url = video_tag['src'].replace('/hls/', '/736x/').replace('.m3u8', '.mp4')
@@ -84,6 +88,7 @@ def get_pinterest_media_direct(url):
         if meta_video and meta_video.get('content'):
             return meta_video['content'], 'video'
 
+        # Image Extract
         meta_image = soup.find('meta', property='og:image')
         if meta_image and meta_image.get('content'):
             img_url = meta_image['content']
@@ -121,6 +126,7 @@ def get_reply_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     async_add_user(user.id, user.first_name)
@@ -149,13 +155,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-# 📢 BROADCAST COMMAND (നിങ്ങൾക്ക് പരസ്യങ്ങൾ അയക്കാൻ)
+# 📢 ADVANCED & SAFE BROADCAST COMMAND
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
     if not update.message.reply_to_message:
-        await update.message.reply_text("⚠️ **പരസ്യമായി അയക്കേണ്ട Message/Photo/Video-യ്ക്ക് റിപ്ലൈ ആയി `/broadcast` എന്ന് അയക്കുക!**", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ **പരസ്യമായി അയക്കേണ്ട സന്ദേശത്തിന് (Message/Photo/Video) റിപ്ലൈ ആയി `/broadcast` എന്ന് അടിക്കുക!**", parse_mode="Markdown")
         return
 
     status_msg = await update.message.reply_text("🚀 **Broadcast ആരംഭിക്കുന്നു...**")
@@ -179,8 +185,16 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message_id=update.message.reply_to_message.message_id
                 )
                 success += 1
-                await asyncio.sleep(0.05)  # Telegram limits ഒഴിവാക്കാൻ
-            except Exception:
+                # Telegram limits തടയാൻ 0.1 സെക്കന്റ് ഡിലേ ചേർക്കുന്നു
+                await asyncio.sleep(0.1)
+            except (Forbidden, BlockedUser):
+                # ബോട്ട് ബ്ലോക്ക് ചെയ്ത ആളുകൾ
+                failed += 1
+            except TelegramError as te:
+                logger.error(f"Telegram error during broadcast to {user_id}: {te}")
+                failed += 1
+            except Exception as e:
+                logger.error(f"Failed to send broadcast to {user_id}: {e}")
                 failed += 1
 
         await status_msg.edit_text(
@@ -193,6 +207,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Broadcast Error: {e}")
         await status_msg.edit_text("❌ Broadcast ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു.")
 
+# Media Download Handler
 async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
 
@@ -238,6 +253,7 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
+# Handle text messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     chat_type = update.effective_chat.type
@@ -275,8 +291,8 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot with Admin ID 7312906293 & Broadcast system is running...")
-    app.run_polling()
+    print("Bot is running seamlessly...")
+    app.run_polling(drop_pending_updates=True) # ഡ്യൂപ്ലിക്കേറ്റ് റിക്വസ്റ്റുകൾ തടയാൻ
 
 if __name__ == "__main__":
     main()
