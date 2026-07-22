@@ -2,12 +2,15 @@ import os
 import re
 import logging
 import threading
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
+import firebase_admin
+from firebase_admin import credentials, db
 
 # Logging setup
 logging.basicConfig(
@@ -16,12 +19,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Render Dummy Server
+# ----------------- ADMIN & FIREBASE SETUP ----------------- #
+ADMIN_ID = 7312906293  # നിങ്ങളുടെ Telegram User ID
+FIREBASE_DB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
+
+# Firebase Initialize ചെയ്യാനുള്ള ഫംഗ്ഷൻ
+def init_firebase():
+    try:
+        if not firebase_admin._apps:
+            options = {'databaseURL': FIREBASE_DB_URL}
+            firebase_admin.initialize_app(options=options)
+            logger.info("Firebase connected successfully!")
+    except Exception as e:
+        logger.error(f"Firebase Init Error: {e}")
+
+# പുതിയ യൂസറെ Firebase ഡാറ്റാബേസിലേക്ക് ചേർക്കുന്നു
+def add_user_firebase(user_id, first_name):
+    try:
+        ref = db.reference(f'users/{user_id}')
+        ref.set({
+            'user_id': user_id,
+            'first_name': first_name
+        })
+    except Exception as e:
+        logger.error(f"Firebase Add User Error: {e}")
+
+# ആകെ യൂസർമാരുടെ എണ്ണം എണ്ണുന്നു
+def get_total_users_firebase():
+    try:
+        ref = db.reference('users')
+        users = ref.get()
+        if users:
+            return len(users)
+        return 0
+    except Exception as e:
+        logger.error(f"Firebase Get Users Error: {e}")
+        return 0
+# ----------------------------------------------------------- #
+
+# Render 24/7 റൺ ചെയ്യാനായുള്ള Dummy Web Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Pinterest Bot is Alive!")
+        self.wfile.write(b"Pinterest Bot with Firebase is Running!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -42,6 +83,7 @@ def get_full_url(url):
         logger.error(f"URL expand error: {e}")
         return url
 
+# Direct Web Scraping വഴി ഡൗൺലോഡ് ചെയ്യൽ
 def get_pinterest_media_direct(url):
     full_url = get_full_url(url)
     try:
@@ -51,6 +93,7 @@ def get_pinterest_media_direct(url):
 
         soup = BeautifulSoup(res.text, 'html.parser')
         
+        # Video Extract
         video_tag = soup.find('video')
         if video_tag and video_tag.get('src'):
             video_url = video_tag['src'].replace('/hls/', '/736x/').replace('.m3u8', '.mp4')
@@ -60,6 +103,7 @@ def get_pinterest_media_direct(url):
         if meta_video and meta_video.get('content'):
             return meta_video['content'], 'video'
 
+        # Image Extract
         meta_image = soup.find('meta', property='og:image')
         if meta_image and meta_image.get('content'):
             img_url = meta_image['content']
@@ -71,6 +115,7 @@ def get_pinterest_media_direct(url):
 
     return None, None
 
+# yt-dlp ഉപയോഗിച്ചുള്ള ബാക്കപ്പ് ഡൗൺലോഡ്
 def download_with_ytdlp(url):
     os.makedirs("downloads", exist_ok=True)
     ydl_opts = {
@@ -85,6 +130,7 @@ def download_with_ytdlp(url):
         filename = ydl.prepare_filename(info)
         return filename
 
+# ചാനൽ & സപ്പോർട്ട് ഇൻലൈൻ ബട്ടണുകൾ
 def get_reply_markup():
     keyboard = [
         [
@@ -97,13 +143,14 @@ def get_reply_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# Start Command handling (Deep Linking ഉൾപ്പെടെ)
+# /start Command Handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ഗ്രൂപ്പിൽ നിന്ന് ബട്ടൺ ക്ലിക്ക് ചെയ്ത് വരുമ്പോൾ (Deep-link handling)
+    user = update.effective_user
+    add_user_firebase(user.id, user.first_name)
+
+    # ഗ്രൂപ്പിൽ നിന്ന് ലിങ്ക് ക്ലിക്ക് ചെയ്തു വരുമ്പോൾ (Deep Linking)
     if context.args and len(context.args) > 0:
         encoded_url = context.args[0]
-        # Base64 കൊണ്ട് എൻകോഡ് ചെയ്ത ലിങ്കിനെ ഡികോഡ് ചെയ്യുന്നു
-        import base64
         try:
             url = base64.b64decode(encoded_url.encode('utf-8')).decode('utf-8')
             await process_media_download(update, context, url)
@@ -126,12 +173,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-# Media ഡൗൺലോഡ് ചെയ്യുന്ന ഫംഗ്ഷൻ
+# 📊 Admin /stats Command
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id == ADMIN_ID:
+        total_users = get_total_users_firebase()
+        await update.message.reply_text(
+            f"📊 **Bot Statistics (Firebase):**\n\n👤 **Total Users:** `{total_users}`",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("❌ You are not authorized to use this command.")
+
+# Media Download Process
 async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
 
     file_path = None
     try:
+        # Method 1: Scraping
         media_url, media_type = get_pinterest_media_direct(url)
 
         if media_url:
@@ -145,6 +205,7 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
                     for chunk in res.iter_content(chunk_size=1024):
                         f.write(chunk)
 
+        # Method 2: yt-dlp Backup
         if not file_path or not os.path.exists(file_path):
             try:
                 full_url = get_full_url(url)
@@ -153,6 +214,7 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
             except Exception as yt_err:
                 logger.error(f"yt-dlp error: {yt_err}")
 
+        # Sending File
         if file_path and os.path.exists(file_path):
             caption = "🚀 **Downloaded via Pinterest Downloader Bot**\n\nJoin @moviestore_imdb_updates for more!"
             with open(file_path, 'rb') as file:
@@ -172,8 +234,11 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
-# Text Messages കൈകാര്യം ചെയ്യുന്നു (Group vs Private)
+# Normal Message Handler (Group/Private Redirection)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    add_user_firebase(user.id, user.first_name)
+
     url = update.message.text.strip()
     chat_type = update.effective_chat.type
 
@@ -182,12 +247,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ **Please send a valid Pinterest URL.**", parse_mode="Markdown")
         return
 
-    # 1. മെസ്സേജ് ഗ്രൂപ്പിൽ നിന്നാണെങ്കിൽ (Group/Supergroup)
+    # 1. ഗ്രൂപ്പിൽ സന്ദേശം വന്നാൽ
     if chat_type in ['group', 'supergroup']:
-        import base64
-        # URL ടെലഗ്രാം ലിങ്ക് സേഫ് ആക്കാൻ Base64 ചെയ്യുന്നു
         encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
-        
         bot_username = (await context.bot.get_me()).username
         pm_link = f"https://t.me/{bot_username}?start={encoded_url}"
 
@@ -201,20 +263,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=group_keyboard,
             reply_to_message_id=update.message.message_id
         )
-
-    # 2. മെസ്സേജ് ബോട്ടിന്റെ Private PM-ൽ നിന്നാണെങ്കിൽ
+    # 2. ബോട്ടിന്റെ Private Chat-ൽ വന്നാൽ
     else:
         await process_media_download(update, context, url)
 
 def main():
+    init_firebase()
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is running with Group Redirection feature...")
+    print("Bot is running seamlessly...")
     app.run_polling()
 
 if __name__ == "__main__":
