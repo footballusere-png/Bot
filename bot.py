@@ -8,8 +8,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError, Forbidden  # 🎯 BlockedUser ഇവിടെ ഒഴിവാക്കി
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, 
+    CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+)
+from telegram.error import TelegramError, Forbidden
 import yt_dlp
 import firebase_admin
 from firebase_admin import db
@@ -22,17 +25,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
-ADMIN_ID = 7312906293  # നിങ്ങളുടെ Telegram User ID
+ADMIN_ID = 7312906293  # Admin Telegram ID
 FIREBASE_DB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
 
-# Firebase initialize
+# Conversation States for Broadcast
+WAITING_FOR_BROADCAST_MSG, CONFIRM_BROADCAST = range(2)
+
+# Firebase setup
 def init_firebase():
     try:
         if not firebase_admin._apps:
             options = {'databaseURL': FIREBASE_DB_URL}
             firebase_admin.initialize_app(options=options)
-            logger.info("Firebase connected successfully!")
+            logger.info("Firebase Realtime DB successfully connected!")
     except Exception as e:
         logger.error(f"Firebase Init Error: {e}")
 
@@ -41,17 +47,16 @@ def async_add_user(user_id, first_name):
     def save():
         try:
             ref = db.reference(f'users/{user_id}')
-            ref.set({'user_id': user_id, 'first_name': first_name})
+            ref.set({'user_id': user_id, 'first_name': first_name or "User"})
         except Exception as e:
             logger.error(f"Firebase Save Error: {e}")
     threading.Thread(target=save, daemon=True).start()
 
-# Render 24/7 റൺ ചെയ്യാനുള്ള Dummy Server
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Pinterest Bot with Broadcast is Active!")
+        self.wfile.write(b"Pinterest Bot is Active!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -78,7 +83,6 @@ def get_pinterest_media_direct(url):
 
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Video Extract
         video_tag = soup.find('video')
         if video_tag and video_tag.get('src'):
             video_url = video_tag['src'].replace('/hls/', '/736x/').replace('.m3u8', '.mp4')
@@ -88,7 +92,6 @@ def get_pinterest_media_direct(url):
         if meta_video and meta_video.get('content'):
             return meta_video['content'], 'video'
 
-        # Image Extract
         meta_image = soup.find('meta', property='og:image')
         if meta_image and meta_image.get('content'):
             img_url = meta_image['content']
@@ -126,7 +129,6 @@ def get_reply_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     async_add_user(user.id, user.first_name)
@@ -155,58 +157,117 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-# 📢 ADVANCED & SAFE BROADCAST COMMAND
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 👑 ADMIN PANEL COMMAND
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    if not update.message.reply_to_message:
-        await update.message.reply_text("⚠️ **പരസ്യമായി അയക്കേണ്ട സന്ദേശത്തിന് (Message/Photo/Video) റിപ്ലൈ ആയി `/broadcast` എന്ന് അടിക്കുക!**", parse_mode="Markdown")
-        return
+    admin_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Start Broadcast", callback_data="start_broadcast_flow")],
+        [InlineKeyboardButton("❌ Close Panel", callback_data="close_admin_panel")]
+    ])
+    await update.message.reply_text("👑 **Admin Panel:**\n\nതാഴെ കാണുന്ന ബട്ടൺ ക്ലിക്ക് ചെയ്ത് ബ്രോഡ്കാസ്റ്റ് ആരംഭിക്കാം:", reply_markup=admin_keyboard, parse_mode="Markdown")
 
-    status_msg = await update.message.reply_text("🚀 **Broadcast ആരംഭിക്കുന്നു...**")
-    
-    try:
-        ref = db.reference('users')
-        users_data = ref.get()
+# Callback button Handler for Admin Panel
+async def admin_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-        if not users_data:
-            await status_msg.edit_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
-            return
+    if query.data == "start_broadcast_flow":
+        if query.from_user.id != ADMIN_ID:
+            return ConversationHandler.END
 
-        success = 0
-        failed = 0
-
-        for user_id in users_data.keys():
-            try:
-                await context.bot.copy_message(
-                    chat_id=int(user_id),
-                    from_chat_id=update.effective_chat.id,
-                    message_id=update.message.reply_to_message.message_id
-                )
-                success += 1
-                await asyncio.sleep(0.1) # Safe delay
-            except Forbidden:
-                # ബോട്ട് ബ്ലോക്ക് ചെയ്തവർ അല്ലെങ്കിൽ ചാറ്റ് സ്റ്റോപ്പ് ചെയ്തവർ
-                failed += 1
-            except TelegramError as te:
-                logger.error(f"Telegram error during broadcast to {user_id}: {te}")
-                failed += 1
-            except Exception as e:
-                logger.error(f"Failed to send broadcast to {user_id}: {e}")
-                failed += 1
-
-        await status_msg.edit_text(
-            f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
-            f"🎯 വിജയിച്ചവ: `{success}`\n"
-            f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
+        cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")]])
+        await query.edit_message_text(
+            "📝 **നിങ്ങൾക്ക് ആളുകൾക്ക് അയക്കേണ്ട മെസ്സേജ്/ഫോട്ടോ/വീഡിയോ ഇപ്പോൾ ഇവിടെ അയക്കുക...**", 
+            reply_markup=cancel_btn,
             parse_mode="Markdown"
         )
-    except Exception as e:
-        logger.error(f"Broadcast Error: {e}")
-        await status_msg.edit_text("❌ Broadcast ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു.")
+        return WAITING_FOR_BROADCAST_MSG
 
-# Media Download Handler
+    elif query.data == "close_admin_panel":
+        await query.message.delete()
+        return ConversationHandler.END
+
+# Step 1: Message ലഭിച്ചാൽ Confirm ചെയ്യാൻ ചോദിക്കുക
+async def receive_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    # Save details of the message to forward
+    context.user_data['broadcast_chat_id'] = update.message.chat_id
+    context.user_data['broadcast_msg_id'] = update.message.message_id
+
+    confirm_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Confirm & Send", callback_data="confirm_send_broadcast"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")
+        ]
+    ])
+
+    await update.message.reply_text(
+        "⚠️ **ഈ മെസ്സേജ് എല്ലാ യൂസേഴ്സിനും അയക്കണമെന്ന് ഉറപ്പാണോ?**", 
+        reply_to_message_id=update.message.message_id,
+        reply_markup=confirm_keyboard,
+        parse_mode="Markdown"
+    )
+    return CONFIRM_BROADCAST
+
+# Step 2: Confirmation Handle ചെയ്യുക (Send or Cancel)
+async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "confirm_send_broadcast":
+        await query.edit_message_text("🚀 **Broadcast ആരംഭിക്കുന്നു... ദയവായി കാത്തിരിക്കുക!**")
+
+        msg_id = context.user_data.get('broadcast_msg_id')
+        from_chat_id = context.user_data.get('broadcast_chat_id')
+
+        try:
+            ref = db.reference('users')
+            users_data = ref.get()
+
+            if not users_data:
+                await query.edit_message_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
+                return ConversationHandler.END
+
+            success = 0
+            failed = 0
+
+            for user_id in users_data.keys():
+                try:
+                    await context.bot.copy_message(
+                        chat_id=int(user_id),
+                        from_chat_id=from_chat_id,
+                        message_id=msg_id
+                    )
+                    success += 1
+                    await asyncio.sleep(0.15)  # Telegram Rate Limit ഒഴിവാക്കാൻ
+                except Exception:
+                    failed += 1
+                    continue
+
+            await query.edit_message_text(
+                f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
+                f"🎯 വിജയിച്ചവ: `{success}`\n"
+                f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Broadcast Error: {e}")
+            await query.edit_message_text("❌ Broadcast ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു.")
+
+        return ConversationHandler.END
+
+    elif query.data == "cancel_broadcast":
+        await query.edit_message_text("❌ **Broadcast റദ്ദാക്കി.**")
+        return ConversationHandler.END
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ **Broadcast റദ്ദാക്കി.**")
+    return ConversationHandler.END
+
 async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
 
@@ -252,7 +313,6 @@ async def process_media_download(update: Update, context: ContextTypes.DEFAULT_T
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
-# Handle text messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     chat_type = update.effective_chat.type
@@ -286,8 +346,29 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Conversation Handler for Button Broadcast
+    broadcast_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(admin_button_click, pattern="^start_broadcast_flow$")
+        ],
+        states={
+            WAITING_FOR_BROADCAST_MSG: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, receive_broadcast_message)
+            ],
+            CONFIRM_BROADCAST: [
+                CallbackQueryHandler(handle_broadcast_confirmation, pattern="^(confirm_send_broadcast|cancel_broadcast)$")
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_broadcast),
+            CallbackQueryHandler(handle_broadcast_confirmation, pattern="^cancel_broadcast$")
+        ],
+    )
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(broadcast_handler)
+    app.add_handler(CallbackQueryHandler(admin_button_click, pattern="^close_admin_panel$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot is running seamlessly...")
