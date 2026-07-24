@@ -3,25 +3,25 @@ import asyncio
 import logging
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from hydrogram import Client, filters
+from hydrogram.types import Message
+import yt_dlp
 
-# Python 3.14+ Asyncio Event Loop Fix for Hydrogram
+# Asyncio Event Loop Fix for Python 3.14+
 try:
     asyncio.get_event_loop()
 except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-from hydrogram import Client, filters
-from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-
 logging.basicConfig(level=logging.INFO)
 
-# ---------- DUMMY WEB SERVER (FOR RENDER KEEP-ALIVE) ----------
+# ---------- DUMMY WEB SERVER FOR RENDER ----------
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot Status: Active and Healthy")
+        self.wfile.write(b"YouTube Downloader Bot Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -33,124 +33,95 @@ def run_web_server():
     server.serve_forever()
 
 Thread(target=run_web_server, daemon=True).start()
-# ---------------------------------------------------------------
+# ------------------------------------------------
 
 # ---------- CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
+BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 
-# Updated with your new active Bot Token
-BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU" 
+app = Client("YTMP3Bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Target Channel ID
-CHANNEL_ID = -1004320858359
-# -----------------------------------
-
-app = Client("MovieSearchBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-# Local Memory Cache for Channel Files
-FILES_CACHE = {}
-
-# 1. Index channel files into memory on bot startup
-async def index_channel_files():
-    logging.info("Indexing channel files into memory...")
-    try:
-        async for msg in app.get_chat_history(CHANNEL_ID, limit=500):
-            if msg.document or msg.video or msg.audio:
-                media = msg.document or msg.video or msg.audio
-                file_name = getattr(media, "file_name", None) or msg.caption or "Media File"
-                FILES_CACHE[msg.id] = file_name
-        logging.info(f"Successfully indexed {len(FILES_CACHE)} media files!")
-    except Exception as e:
-        logging.error(f"Indexing Error: {e}")
-
-# 2. Auto-Index newly uploaded files in the channel
-@app.on_message(filters.chat(CHANNEL_ID) & (filters.document | filters.video | filters.audio))
-async def auto_index_new_file(client, message: Message):
-    media = message.document or message.video or message.audio
-    file_name = getattr(media, "file_name", None) or message.caption or "Media File"
-    FILES_CACHE[message.id] = file_name
-    logging.info(f"New file indexed: {file_name}")
-
-# 3. Start Command Handler
+# Start Command
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message: Message):
-    welcome_text = (
-        f"👋 **Welcome, {message.from_user.first_name}!**\n\n"
-        "🎬 **Movie & Media Search Engine**\n\n"
-        "I can help you search and retrieve movies, series, and media files directly from our repository.\n\n"
-        "💡 **How to use:**\n"
-        "Simply type and send the **name of the movie or file** you are looking for!"
+    welcome = (
+        f"👋 **Hello {message.from_user.first_name}!**\n\n"
+        "🎵 **YouTube to MP3 Downloader**\n\n"
+        "Send me any **YouTube Link** or type a **Song Name**, and I will convert & send the MP3 audio to you!"
     )
-    await message.reply_text(welcome_text)
+    await message.reply_text(welcome)
 
-# 4. Search Handler
+# Helper Function: Download Audio using yt-dlp
+def download_yt_audio(url_or_query):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '320',
+        }],
+        'quiet': True,
+        'no_warnings': True,
+        'default_search': 'ytsearch1', # Search YouTube if text query is sent
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url_or_query, download=True)
+        if 'entries' in info:
+            info = info['entries'][0]
+        
+        file_path = ydl.prepare_filename(info).rsplit('.', 1)[0] + ".mp3"
+        title = info.get('title', 'Audio Track')
+        performer = info.get('uploader', 'YouTube')
+        duration = int(info.get('duration', 0))
+        
+        return file_path, title, performer, duration
+
+# YouTube Download Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
-async def search_handler(client, message: Message):
+async def handle_youtube_download(client, message: Message):
     query = message.text.strip()
-
-    if len(query) < 2:
-        await message.reply_text("⚠️ **Notice:** Please enter at least 2 characters to initiate a search.")
-        return
-
-    # Instant status update: Searching
-    status_msg = await message.reply_text(f"🔍 **Searching repository for:** `{query}`...")
-
-    results = []
-    for msg_id, file_name in FILES_CACHE.items():
-        if query.lower() in file_name.lower():
-            results.append([
-                InlineKeyboardButton(
-                    f"🎬 {file_name}", 
-                    callback_data=f"getmsg_{msg_id}"
-                )
-            ])
-            if len(results) >= 10:  # Limit display to top 10 matches
-                break
-
-    if not results:
-        await status_msg.edit_text(
-            f"❌ **No Results Found**\n\n"
-            f"Could not find any files matching: `{query}`\n"
-            "Please check the spelling and try again."
-        )
-        return
-
-    markup = InlineKeyboardMarkup(results)
-    await status_msg.edit_text(
-        f"🎯 **Search Results for:** `{query}`\n\n"
-        f"Select a file below to receive it instantly:",
-        reply_markup=markup
-    )
-
-# 5. File Delivery Handler
-@app.on_callback_query(filters.regex(r"^getmsg_"))
-async def send_file_handler(client, callback_query):
-    msg_id = int(callback_query.data.split("_")[1])
     
-    await callback_query.answer("🚀 Processing request: Sending file now...", show_alert=False)
-    
-    sending_status = await callback_query.message.reply_text("📤 **Sending requested file... Please wait.**")
+    status_msg = await message.reply_text("📥 **Processing & Downloading Audio... Please wait.**")
 
     try:
-        await app.copy_message(
-            chat_id=callback_query.from_user.id,
-            from_chat_id=CHANNEL_ID,
-            message_id=msg_id
+        # Run blocking download function in async thread
+        loop = asyncio.get_running_loop()
+        file_path, title, performer, duration = await loop.run_in_executor(
+            None, download_yt_audio, query
         )
-        await sending_status.edit_text("✅ **File delivered successfully! Enjoy watching.**")
-    except Exception as e:
-        logging.error(f"File Transfer Error: {e}")
-        await sending_status.edit_text("❌ **Error:** Failed to deliver the file. It may have been deleted or moved.")
 
-# ---------- BOT INITIALIZATION ----------
+        await status_msg.edit_text("📤 **Uploading MP3 to Telegram...**")
+
+        # Send Audio File
+        await message.reply_audio(
+            audio=file_path,
+            caption=f"🎵 **{title}**\n\nDownloaded via MP3 Downloader Bot",
+            title=title,
+            performer=performer,
+            duration=duration
+        )
+
+        # Cleanup downloaded file from server storage
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        await status_msg.delete()
+
+    except Exception as e:
+        logging.error(f"Download Error: {e}")
+        await status_msg.edit_text("❌ **Error:** Unable to download this track. YouTube might be restricting this query or IP.")
+
+# ---------- BOT START ----------
 if __name__ == "__main__":
-    print("Initializing Movie Search Engine...")
+    if not os.path.exists("downloads"):
+        os.makedirs("downloads")
 
     async def main():
         await app.start()
-        await index_channel_files()
-        print("Bot is fully operational and ready to serve requests!")
+        print("YouTube MP3 Bot is Running!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
