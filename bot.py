@@ -1,13 +1,13 @@
 import os
 import asyncio
 import logging
+import requests
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from hydrogram.enums import ChatAction
 from hydrogram.errors import UserNotParticipant
-import yt_dlp
 
 # Asyncio Event Loop Fix
 try:
@@ -71,47 +71,29 @@ async def start_cmd(client, message: Message):
     )
     await message.reply_text(welcome)
 
-# Youtube Search Function (100% Reliable & No API Ban)
-def search_yt(query):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': 'in_playlist',
-        'default_search': 'ytsearch5'
-    }
-    results = []
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            if 'entries' in info:
-                for entry in info['entries']:
-                    results.append({
-                        'id': entry.get('id'),
-                        'title': entry.get('title'),
-                        'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
-                        'duration': entry.get('duration', 0),
-                        'uploader': entry.get('uploader', 'Unknown Artist')
-                    })
-        except Exception as e:
-            logging.error(f"YouTube Search Error: {e}")
-    return results
+# Fast Direct JioSaavn Search (Bypasses Render Block)
+def search_jiosaavn_direct(query):
+    url = f"https://jiosaavn-api-privateindexer.vercel.app/search/songs?query={query}"
+    try:
+        res = requests.get(url, timeout=8)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("status") == "SUCCESS" and data.get("data"):
+                return data["data"]["results"][:5]
+    except Exception as e:
+        logging.error(f"Search Error: {e}")
+    return []
 
-# Download Audio Function
-def download_yt_audio(video_url, output_path):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '320',
-        }],
+# Download File Function
+def download_file(url, destination):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
+    res = requests.get(url, headers=headers, stream=True)
+    with open(destination, 'wb') as f:
+        for chunk in res.iter_content(chunk_size=1024*1024):
+            if chunk:
+                f.write(chunk)
 
 # Search Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
@@ -139,26 +121,27 @@ async def handle_search(client, message: Message):
 
     query = message.text.strip()
     
-    # Action Status
+    # Action Status: typing
     await client.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     status_msg = await message.reply_text("🔍 **serching song...**")
 
     loop = asyncio.get_running_loop()
-    results = await loop.run_in_executor(None, search_yt, query)
+    results = await loop.run_in_executor(None, search_jiosaavn_direct, query)
 
     if not results:
         await status_msg.edit_text("❌ **No exact songs found. Please check the spelling.**")
         return
 
     buttons = []
-    for song in results:
-        song_id = song['id']
+    for idx, song in enumerate(results):
+        song_id = song.get("id") or str(idx)
         SONG_CACHE[song_id] = song  
 
-        title = song['title']
+        title = song.get("name", "Unknown Title")
+        album = song.get("album", {}).get("name", "") if isinstance(song.get("album"), dict) else ""
         
-        # Song Title First in Button
-        btn_text = f"🎵 {title}"
+        # Song Title First in Inline Button
+        btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
         buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
 
     keyboard = InlineKeyboardMarkup(buttons)
@@ -190,38 +173,49 @@ async def callback_handler(client, query: CallbackQuery):
 
         await query.answer()
         
-        # Action indicator: Downloading
+        # Action Status: downloading
         await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.RECORD_AUDIO)
         await query.message.edit_text("📥 **downloading mp3 file...**")
 
         try:
-            title = song_data['title']
-            artist = song_data['uploader']
-            video_url = song_data['url']
-            duration = song_data['duration']
+            title = song_data.get("name", "Audio Track")
+            
+            # Extract Artist
+            artists = "Unknown Artist"
+            if song_data.get("primaryArtists"):
+                artists = song_data["primaryArtists"]
 
-            file_base = f"downloads/{song_id}"
+            # Extract Direct MP3 URL
+            download_urls = song_data.get("downloadUrl", [])
+            audio_url = download_urls[-1].get("link") or download_urls[-1].get("url") if download_urls else None
+
+            if not audio_url:
+                await query.message.edit_text("❌ **Download link not available for this song.**")
+                return
+
             file_path = f"downloads/{song_id}.mp3"
 
             loop = asyncio.get_running_loop()
             
-            # Download Audio
-            await loop.run_in_executor(None, download_yt_audio, video_url, file_base)
+            # Fast Direct Download
+            await loop.run_in_executor(None, download_file, audio_url, file_path)
 
-            # Action indicator: Sending Audio
+            # Action Status: sending
             await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.UPLOAD_AUDIO)
             await query.message.edit_text("📤 **file senting mp3 file...**")
 
-            # Send Audio File
+            duration = int(song_data.get("duration", 0))
+
+            # Send MP3
             await query.message.reply_audio(
                 audio=file_path,
-                caption=f"🎵 **{title}**\n🎤 **Artist:** {artist}\n\nDownloaded via Music Bot",
+                caption=f"🎵 **{title}**\n🎤 **Artist:** {artists}\n\nDownloaded via Music Bot",
                 title=title,
-                performer=artist,
+                performer=artists,
                 duration=duration
             )
 
-            # Cleanup local files
+            # Cleanup
             if os.path.exists(file_path):
                 os.remove(file_path)
 
