@@ -1,7 +1,15 @@
 import os
+import asyncio
 import logging
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Python 3.14+ Asyncio Event Loop Fix for Hydrogram
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 from hydrogram import Client, filters
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
@@ -32,8 +40,8 @@ API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8686380719:AAGXFrU7MymK59RXU8iioBAAqn4O_fLuYtk"
 
-# നിങ്ങളുടെ ചാനൽ ID ചേർത്തു
-CHANNEL_ID = -1004320858359  
+# ചാനൽ ID
+CHANNEL_ID = -1004320858359
 # -----------------------------------
 
 app = Client("TelegramNativeSearchBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
