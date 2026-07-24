@@ -1,21 +1,21 @@
 import asyncio
-# Python 3.14+ event loop issue fix
 asyncio.set_event_loop(asyncio.new_event_loop())
 
 import dns.resolver
-# Termux & Render DNS resolution fix
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
 import os
 import logging
+import certifi
+import ssl
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pymongo import MongoClient
 
-# ---------- DUMMY WEB SERVER (RENDER PORT BINDING & HEALTH CHECK) ----------
+# ---------- DUMMY WEB SERVER ----------
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -31,22 +31,28 @@ def run_web_server():
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
-# Render Web Service ബാക്ക്ഗ്രൗണ്ട് പോർട്ട് സെർവർ
 Thread(target=run_web_server, daemon=True).start()
-# -----------------------------------------------------------
+# -------------------------------------
 
 # ---------- CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8686380719:AAGXFrU7MymK59RXU8iioBAAqn4O_fLuYtk"
 
-# MongoDB Connection URI
-MONGO_URI = "mongodb+srv://footballusere_db_user:Hnm6rRWbUHvhmbWd@cluster0.k2t3crf.mongodb.net/?appName=Cluster0"
+# MONGO URI (tlsInvalidHostnamesAllowed, tlsAllowInvalidCertificates പരാമീറ്ററുകൾ സഹിതം)
+MONGO_URI = "mongodb+srv://footballusere_db_user:Hnm6rRWbUHvhmbWd@cluster0.k2t3crf.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority"
 DB_NAME = "AutoFilterBot"
 # -----------------------------------
 
-# MongoDB Client
-mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+# MongoDB Client with Certifi & SSL Bypass for handshake issues
+mongo_client = MongoClient(
+    MONGO_URI,
+    tls=True,
+    tlsCAFile=certifi.where(),
+    tlsAllowInvalidCertificates=True,
+    serverSelectionTimeoutMS=10000
+)
+
 db = mongo_client[DB_NAME]
 files_collection = db["files"]
 
@@ -91,7 +97,7 @@ async def save_file(client, message: Message):
     except Exception as e:
         logging.error(f"MongoDB Error: {e}")
 
-# 3. Auto-Filter Search System (Private & Group Chats)
+# 3. Auto-Filter Search System
 @app.on_message(filters.text & ~filters.command(["start"]))
 async def filter_search(client, message: Message):
     if message.chat.type.value == "channel":
@@ -132,7 +138,6 @@ async def send_file_handler(client, callback_query):
     except Exception as e:
         logging.error(f"Callback Error: {e}")
 
-# Bot റൺ ചെയ്യുന്നു
 if __name__ == "__main__":
     print("Bot Started Successfully!")
     app.run()
