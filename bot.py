@@ -39,8 +39,8 @@ Thread(target=run_web_server, daemon=True).start()
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 
-# ⚠️ Replace with your NEW Bot Token generated from @BotFather
-BOT_TOKEN = "YOUR_NEW_BOT_TOKEN_HERE" 
+# Updated with your new active Bot Token
+BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU" 
 
 # Target Channel ID
 CHANNEL_ID = -1004320858359
@@ -48,10 +48,10 @@ CHANNEL_ID = -1004320858359
 
 app = Client("MovieSearchBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Memory Cache for Files
+# Local Memory Cache for Channel Files
 FILES_CACHE = {}
 
-# 1. Index channel files into memory on startup
+# 1. Index channel files into memory on bot startup
 async def index_channel_files():
     logging.info("Indexing channel files into memory...")
     try:
@@ -64,7 +64,7 @@ async def index_channel_files():
     except Exception as e:
         logging.error(f"Indexing Error: {e}")
 
-# 2. Auto-Index new incoming files from the channel
+# 2. Auto-Index newly uploaded files in the channel
 @app.on_message(filters.chat(CHANNEL_ID) & (filters.document | filters.video | filters.audio))
 async def auto_index_new_file(client, message: Message):
     media = message.document or message.video or message.audio
@@ -72,7 +72,7 @@ async def auto_index_new_file(client, message: Message):
     FILES_CACHE[message.id] = file_name
     logging.info(f"New file indexed: {file_name}")
 
-# 3. Professional Start Command
+# 3. Start Command Handler
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message: Message):
     welcome_text = (
@@ -84,7 +84,7 @@ async def start_cmd(client, message: Message):
     )
     await message.reply_text(welcome_text)
 
-# 4. Professional Movie Search System
+# 4. Search Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def search_handler(client, message: Message):
     query = message.text.strip()
@@ -93,7 +93,7 @@ async def search_handler(client, message: Message):
         await message.reply_text("⚠️ **Notice:** Please enter at least 2 characters to initiate a search.")
         return
 
-    # Show "Searching Movie..." status
+    # Instant status update: Searching
     status_msg = await message.reply_text(f"🔍 **Searching repository for:** `{query}`...")
 
     results = []
@@ -105,7 +105,7 @@ async def search_handler(client, message: Message):
                     callback_data=f"getmsg_{msg_id}"
                 )
             ])
-            if len(results) >= 10:  # Limit up to 10 results
+            if len(results) >= 10:  # Limit display to top 10 matches
                 break
 
     if not results:
@@ -123,12 +123,11 @@ async def search_handler(client, message: Message):
         reply_markup=markup
     )
 
-# 5. Professional File Delivery System
+# 5. File Delivery Handler
 @app.on_callback_query(filters.regex(r"^getmsg_"))
 async def send_file_handler(client, callback_query):
     msg_id = int(callback_query.data.split("_")[1])
     
-    # Notify user that the file is being transferred
     await callback_query.answer("🚀 Processing request: Sending file now...", show_alert=False)
     
     sending_status = await callback_query.message.reply_text("📤 **Sending requested file... Please wait.**")
