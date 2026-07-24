@@ -1,5 +1,3 @@
 hydrogram
 tgcrypto
-pymongo
-dnspython
-certifi
+firebase-admin
