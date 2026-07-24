@@ -6,9 +6,10 @@ from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from hydrogram.enums import ChatAction
 from hydrogram.errors import UserNotParticipant
 
-# Asyncio Event Loop Fix for Python 3.14+
+# Asyncio Event Loop Fix
 try:
     asyncio.get_event_loop()
 except RuntimeError:
@@ -70,27 +71,31 @@ async def start_cmd(client, message: Message):
     )
     await message.reply_text(welcome)
 
-# JioSaavn API Search Function (Updated Stable Endpoint)
+# JioSaavn API Search Function (Working Stable Endpoint)
 def search_jiosaavn(query):
-    url = f"https://jiosaavn-api-v3.vercel.app/search/songs?query={query}"
+    url = f"https://saavn.me/search/songs?query={query}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    }
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if isinstance(data, list):
-            return data[:5]
-        elif isinstance(data, dict) and data.get("results"):
-            return data["results"][:5]
-        elif isinstance(data, dict) and data.get("data"):
-            return data["data"][:5]
-            
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "SUCCESS" or data.get("success"):
+                results = data.get("data", {}).get("results", [])
+                return results[:5]
+            elif isinstance(data.get("data"), list):
+                return data["data"][:5]
     except Exception as e:
         logging.error(f"JioSaavn API Error: {e}")
     return []
 
 # Download File Function
 def download_file(url, destination):
-    res = requests.get(url, stream=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    }
+    res = requests.get(url, headers=headers, stream=True)
     with open(destination, 'wb') as f:
         for chunk in res.iter_content(chunk_size=1024):
             if chunk:
@@ -122,7 +127,10 @@ async def handle_search(client, message: Message):
 
     query = message.text.strip()
     
-    # Status: serching song
+    # Typing action for Status below Bot Name
+    await client.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    
+    # Status Message: serching song
     status_msg = await message.reply_text("🔍 **serching song...**")
 
     loop = asyncio.get_running_loop()
@@ -134,8 +142,7 @@ async def handle_search(client, message: Message):
 
     buttons = []
     for idx, song in enumerate(results):
-        # Handle different API field names for ID and Title
-        song_id = song.get("id") or song.get("_id") or str(idx)
+        song_id = song.get("id") or str(idx)
         SONG_CACHE[str(song_id)] = song  
 
         title = song.get("name") or song.get("title") or "Unknown Title"
@@ -145,7 +152,7 @@ async def handle_search(client, message: Message):
         elif isinstance(song.get("album"), str):
             album = song["album"]
         
-        # Display Song Name on Button
+        # Song Title First in Inline Button
         btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
         
         buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
@@ -179,7 +186,10 @@ async def callback_handler(client, query: CallbackQuery):
 
         await query.answer()
         
-        # Status: downloading mp3 file
+        # Action indicator below bot name: Downloading
+        await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.RECORD_AUDIO)
+        
+        # Status Message: downloading mp3 file
         await query.message.edit_text("📥 **downloading mp3 file...**")
 
         try:
@@ -191,7 +201,7 @@ async def callback_handler(client, query: CallbackQuery):
                 if isinstance(song_data["artists"], dict) and "primary" in song_data["artists"]:
                     artists = ", ".join([a.get("name", "") for a in song_data["artists"]["primary"]])
                 elif isinstance(song_data["artists"], list):
-                    artists = ", ".join([str(a) for a in song_data["artists"]])
+                    artists = ", ".join([str(a.get("name", a)) for a in song_data["artists"]])
 
             # Extract Audio Download URL
             audio_url = None
@@ -201,8 +211,6 @@ async def callback_handler(client, query: CallbackQuery):
                     audio_url = urls[-1].get("url") or urls[-1].get("link")
                 elif isinstance(urls, str):
                     audio_url = urls
-            elif "media_url" in song_data:
-                audio_url = song_data["media_url"]
             elif "url" in song_data:
                 audio_url = song_data["url"]
 
@@ -227,7 +235,7 @@ async def callback_handler(client, query: CallbackQuery):
 
             loop = asyncio.get_running_loop()
             
-            # Download MP3 and Thumbnail Files
+            # Download MP3 File
             await loop.run_in_executor(None, download_file, audio_url, file_path)
             if thumb_url:
                 try:
@@ -235,7 +243,10 @@ async def callback_handler(client, query: CallbackQuery):
                 except Exception:
                     pass
 
-            # Status: file senting mp3 file
+            # Action indicator below bot name: Sending Audio
+            await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.UPLOAD_AUDIO)
+
+            # Status Message: file senting mp3 file
             await query.message.edit_text("📤 **file senting mp3 file...**")
 
             duration = int(song_data.get("duration", 0))
