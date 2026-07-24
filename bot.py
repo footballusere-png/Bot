@@ -1,21 +1,40 @@
 import asyncio
-# Python version compatibility fix
+# Python 3.14 compatibility fix
 asyncio.set_event_loop(asyncio.new_event_loop())
 
 import dns.resolver
-# DNS resolution setup
+# DNS resolution fix for MongoDB
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
+import os
 import logging
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pymongo import MongoClient
 
+# ---------- DUMMY WEB SERVER FOR RENDER PORT BINDING ----------
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is Running Alive!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
+# Web Server ബാക്ക്ഗ്രൗണ്ടിൽ സ്റ്റാർട്ട് ചെയ്യുന്നു
+Thread(target=run_web_server, daemon=True).start()
+# -------------------------------------------------------------
+
 # ---------- CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
-BOT_TOKEN = "8686380719:AAGXFrU7MymK59RXU8iioBAAqn4O_fLuYtk"
+BOT_TOKEN = "8686380719:AAGoYkxNrtrZ034sGSPbMxEG39lMZuHIm9Y"
 
 # MongoDB Connection URI
 MONGO_URI = "mongodb+srv://footballusere_db_user:Hnm6rRWbUHvhmbWd@cluster0.k2t3crf.mongodb.net/?appName=Cluster0"
