@@ -1,3 +1,4 @@
 hydrogram
 tgcrypto
 requests
+yt-dlp
