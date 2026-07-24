@@ -70,14 +70,20 @@ async def start_cmd(client, message: Message):
     )
     await message.reply_text(welcome)
 
-# JioSaavn API Search Function
+# JioSaavn API Search Function (Updated Stable Endpoint)
 def search_jiosaavn(query):
-    url = f"https://saavn.dev/api/search/songs?query={query}&limit=5"
+    url = f"https://jiosaavn-api-v3.vercel.app/search/songs?query={query}"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
-        if data.get("success") and data.get("data", {}).get("results"):
-            return data["data"]["results"]
+        
+        if isinstance(data, list):
+            return data[:5]
+        elif isinstance(data, dict) and data.get("results"):
+            return data["results"][:5]
+        elif isinstance(data, dict) and data.get("data"):
+            return data["data"][:5]
+            
     except Exception as e:
         logging.error(f"JioSaavn API Error: {e}")
     return []
@@ -116,7 +122,7 @@ async def handle_search(client, message: Message):
 
     query = message.text.strip()
     
-    # Custom Search Status Message
+    # Status: serching song
     status_msg = await message.reply_text("🔍 **serching song...**")
 
     loop = asyncio.get_running_loop()
@@ -128,13 +134,18 @@ async def handle_search(client, message: Message):
 
     buttons = []
     for idx, song in enumerate(results):
-        song_id = song["id"]
-        SONG_CACHE[song_id] = song  # Save song data in cache
+        # Handle different API field names for ID and Title
+        song_id = song.get("id") or song.get("_id") or str(idx)
+        SONG_CACHE[str(song_id)] = song  
 
-        title = song.get("name", "Unknown Title")
-        album = song.get("album", {}).get("name", "")
+        title = song.get("name") or song.get("title") or "Unknown Title"
+        album = ""
+        if isinstance(song.get("album"), dict):
+            album = song["album"].get("name", "")
+        elif isinstance(song.get("album"), str):
+            album = song["album"]
         
-        # Display Title First
+        # Display Song Name on Button
         btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
         
         buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
@@ -168,24 +179,44 @@ async def callback_handler(client, query: CallbackQuery):
 
         await query.answer()
         
-        # Step 1: Downloading Status
-        await query.message.edit_text("📥 **downloading song...**")
+        # Status: downloading mp3 file
+        await query.message.edit_text("📥 **downloading mp3 file...**")
 
         try:
-            title = song_data.get("name", "Audio Track")
+            title = song_data.get("name") or song_data.get("title") or "Audio Track"
             
             # Extract Artists
             artists = "Unknown Artist"
-            if song_data.get("artists", {}).get("primary"):
-                artists = ", ".join([a["name"] for a in song_data["artists"]["primary"]])
+            if song_data.get("artists"):
+                if isinstance(song_data["artists"], dict) and "primary" in song_data["artists"]:
+                    artists = ", ".join([a.get("name", "") for a in song_data["artists"]["primary"]])
+                elif isinstance(song_data["artists"], list):
+                    artists = ", ".join([str(a) for a in song_data["artists"]])
 
-            # Audio Download URL (320kbps/Best Quality)
-            download_urls = song_data.get("downloadUrl", [])
-            audio_url = download_urls[-1]["url"] if download_urls else None
+            # Extract Audio Download URL
+            audio_url = None
+            if "downloadUrl" in song_data:
+                urls = song_data["downloadUrl"]
+                if isinstance(urls, list) and len(urls) > 0:
+                    audio_url = urls[-1].get("url") or urls[-1].get("link")
+                elif isinstance(urls, str):
+                    audio_url = urls
+            elif "media_url" in song_data:
+                audio_url = song_data["media_url"]
+            elif "url" in song_data:
+                audio_url = song_data["url"]
 
-            # Thumbnail Image URL
-            image_urls = song_data.get("image", [])
-            thumb_url = image_urls[-1]["url"] if image_urls else None
+            # Extract Thumbnail URL
+            thumb_url = None
+            if "image" in song_data:
+                images = song_data["image"]
+                if isinstance(images, list) and len(images) > 0:
+                    if isinstance(images[-1], dict):
+                        thumb_url = images[-1].get("url") or images[-1].get("link")
+                    elif isinstance(images[-1], str):
+                        thumb_url = images[-1]
+                elif isinstance(images, str):
+                    thumb_url = images
 
             if not audio_url:
                 await query.message.edit_text("❌ **Download link not available for this song.**")
@@ -196,13 +227,16 @@ async def callback_handler(client, query: CallbackQuery):
 
             loop = asyncio.get_running_loop()
             
-            # Download MP3 and Thumbnail
+            # Download MP3 and Thumbnail Files
             await loop.run_in_executor(None, download_file, audio_url, file_path)
             if thumb_url:
-                await loop.run_in_executor(None, download_file, thumb_url, thumb_path)
+                try:
+                    await loop.run_in_executor(None, download_file, thumb_url, thumb_path)
+                except Exception:
+                    pass
 
-            # Step 2: Sharing Status
-            await query.message.edit_text("📤 **file sharing mp3...**")
+            # Status: file senting mp3 file
+            await query.message.edit_text("📤 **file senting mp3 file...**")
 
             duration = int(song_data.get("duration", 0))
 
@@ -216,7 +250,7 @@ async def callback_handler(client, query: CallbackQuery):
                 thumb=thumb_path if thumb_path and os.path.exists(thumb_path) else None
             )
 
-            # Cleanup
+            # Cleanup local files
             if os.path.exists(file_path):
                 os.remove(file_path)
             if thumb_path and os.path.exists(thumb_path):
