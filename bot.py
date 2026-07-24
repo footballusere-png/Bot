@@ -15,19 +15,23 @@ from hydrogram import Client, filters
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pymongo import MongoClient
 
-# ---------- DUMMY WEB SERVER (RENDER PORT BINDING) ----------
+# ---------- DUMMY WEB SERVER (RENDER PORT BINDING & HEALTH CHECK) ----------
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is Active and Running!")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
-# Render Web Service ഉറങ്ങിപ്പോകാതിരിക്കാൻ ബാക്ക്ഗ്രൗണ്ട് പോർട്ട് സെർവർ
+# Render Web Service ബാക്ക്ഗ്രൗണ്ട് പോർട്ട് സെർവർ
 Thread(target=run_web_server, daemon=True).start()
 # -----------------------------------------------------------
 
@@ -59,8 +63,8 @@ async def start_handler(client, message: Message):
         "ഞാൻ ഒരു **Auto-Filter Search Bot** ആണ്. ഫയലുകൾ സെർച്ച് ചെയ്യാൻ അതിൻ്റെ പേര് മാത്രം ടൈപ്പ് ചെയ്തു അയക്കൂ!"
     )
 
-# 2. File Indexing System (Documents, Videos, Audio)
-@app.on_message(filters.document | filters.video | filters.audio)
+# 2. File Indexing System (Private Chats & Channels)
+@app.on_message((filters.document | filters.video | filters.audio) & (filters.private | filters.channel))
 async def save_file(client, message: Message):
     media = message.document or message.video or message.audio
     if not media:
@@ -77,15 +81,22 @@ async def save_file(client, message: Message):
                 "file_id": file_id,
                 "file_size": file_size
             })
-            await message.reply_text(f"✅ ഫയൽ ഡാറ്റാബേസിൽ സേവ് ചെയ്തു: `{file_name}`", quote=True)
+            if message.chat.type.value == "private":
+                await message.reply_text(f"✅ ഫയൽ ഡാറ്റാബേസിൽ സേവ് ചെയ്തു: `{file_name}`", quote=True)
+            else:
+                logging.info(f"Channel file saved: {file_name}")
         else:
-            await message.reply_text("ℹ️ ഈ ഫയൽ മുൻപേ സേവ് ചെയ്തതാണ്.", quote=True)
+            if message.chat.type.value == "private":
+                await message.reply_text("ℹ️ ഈ ഫയൽ മുൻപേ സേവ് ചെയ്തതാണ്.", quote=True)
     except Exception as e:
         logging.error(f"MongoDB Error: {e}")
 
-# 3. Auto-Filter Search System
-@app.on_message(filters.text & filters.private & ~filters.command(["start"]))
+# 3. Auto-Filter Search System (Private & Group Chats)
+@app.on_message(filters.text & ~filters.command(["start"]))
 async def filter_search(client, message: Message):
+    if message.chat.type.value == "channel":
+        return
+
     query = message.text.strip()
     
     try:
