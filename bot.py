@@ -48,12 +48,18 @@ async def start_cmd(client, message: Message):
     welcome = (
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
         "🎵 **Free MP3 Music Downloader**\n\n"
-        "Send me any **Song Name** or **SoundCloud Link**, and I will download & send the high-quality MP3 audio to you!"
+        "Send me any **Song Name** or **SoundCloud URL**, and I will download & send the high-quality MP3 audio to you!"
     )
     await message.reply_text(welcome)
 
-# SoundCloud / Free Engine Audio Downloader
+# SoundCloud Audio Downloader
 def download_free_audio(query):
+    # SoundCloud URL അല്ലെങ്കില്‍ Query ഫോർമാറ്റ് തിരിക്കൽ
+    if not query.startswith("http"):
+        search_target = f"scsearch1:{query}"
+    else:
+        search_target = query
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': 'downloads/%(title)s.%(ext)s',
@@ -64,13 +70,13 @@ def download_free_audio(query):
         }],
         'quiet': True,
         'no_warnings': True,
-        # YouTube-ന് പകരം SoundCloud-ൽ ഫ്രീയായി സെർച്ച് ചെയ്യുന്നു
-        'default_search': 'scsearch1', 
+        # YouTube Extractors പൂർണ്ണമായി ബ്ലോക്ക് ചെയ്യുന്നു
+        'allowed_extractors': ['soundcloud', 'soundcloud:search'], 
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(query, download=True)
-        if 'entries' in info:
+        info = ydl.extract_info(search_target, download=True)
+        if 'entries' in info and len(info['entries']) > 0:
             info = info['entries'][0]
         
         file_path = ydl.prepare_filename(info).rsplit('.', 1)[0] + ".mp3"
@@ -85,7 +91,7 @@ def download_free_audio(query):
 async def handle_music_download(client, message: Message):
     query = message.text.strip()
     
-    status_msg = await message.reply_text("📥 **Searching & Downloading Audio... Please wait.**")
+    status_msg = await message.reply_text("📥 **Searching SoundCloud & Downloading Audio... Please wait.**")
 
     try:
         loop = asyncio.get_running_loop()
@@ -103,7 +109,6 @@ async def handle_music_download(client, message: Message):
             duration=duration
         )
 
-        # Download ചെയ്ത ശേഷം ഫയൽ സർവറിൽ നിന്ന് മായ്ക്കുന്നു
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -111,7 +116,7 @@ async def handle_music_download(client, message: Message):
 
     except Exception as e:
         logging.error(f"Download Error: {e}")
-        await status_msg.edit_text("❌ **Error:** Could not find or download this track. Please check the song name.")
+        await status_msg.edit_text("❌ **Error:** Could not find this track on SoundCloud. Please check the song spelling.")
 
 # ---------- BOT START ----------
 if __name__ == "__main__":
