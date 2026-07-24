@@ -1,13 +1,13 @@
 import os
 import asyncio
 import logging
-import requests
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from hydrogram.enums import ChatAction
 from hydrogram.errors import UserNotParticipant
+import yt_dlp
 
 # Asyncio Event Loop Fix
 try:
@@ -23,7 +23,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"JioSaavn Music Bot Active")
+        self.wfile.write(b"Music Downloader Bot Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -43,7 +43,7 @@ API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 CHANNEL_ID = -1004320858359  # നിങ്ങളുടെ ചാനൽ ID
 
-app = Client("JioSaavnMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("MusicDownloaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Temporary Memory Store for Songs
 SONG_CACHE = {}
@@ -71,35 +71,47 @@ async def start_cmd(client, message: Message):
     )
     await message.reply_text(welcome)
 
-# JioSaavn API Search Function (Working Stable Endpoint)
-def search_jiosaavn(query):
-    url = f"https://saavn.me/search/songs?query={query}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+# Youtube Search Function (100% Reliable & No API Ban)
+def search_yt(query):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': 'in_playlist',
+        'default_search': 'ytsearch5'
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("status") == "SUCCESS" or data.get("success"):
-                results = data.get("data", {}).get("results", [])
-                return results[:5]
-            elif isinstance(data.get("data"), list):
-                return data["data"][:5]
-    except Exception as e:
-        logging.error(f"JioSaavn API Error: {e}")
-    return []
+    results = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            if 'entries' in info:
+                for entry in info['entries']:
+                    results.append({
+                        'id': entry.get('id'),
+                        'title': entry.get('title'),
+                        'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
+                        'duration': entry.get('duration', 0),
+                        'uploader': entry.get('uploader', 'Unknown Artist')
+                    })
+        except Exception as e:
+            logging.error(f"YouTube Search Error: {e}")
+    return results
 
-# Download File Function
-def download_file(url, destination):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+# Download Audio Function
+def download_yt_audio(video_url, output_path):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '320',
+        }],
     }
-    res = requests.get(url, headers=headers, stream=True)
-    with open(destination, 'wb') as f:
-        for chunk in res.iter_content(chunk_size=1024):
-            if chunk:
-                f.write(chunk)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([video_url])
 
 # Search Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
@@ -127,34 +139,26 @@ async def handle_search(client, message: Message):
 
     query = message.text.strip()
     
-    # Typing action for Status below Bot Name
+    # Action Status
     await client.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-    
-    # Status Message: serching song
     status_msg = await message.reply_text("🔍 **serching song...**")
 
     loop = asyncio.get_running_loop()
-    results = await loop.run_in_executor(None, search_jiosaavn, query)
+    results = await loop.run_in_executor(None, search_yt, query)
 
     if not results:
         await status_msg.edit_text("❌ **No exact songs found. Please check the spelling.**")
         return
 
     buttons = []
-    for idx, song in enumerate(results):
-        song_id = song.get("id") or str(idx)
-        SONG_CACHE[str(song_id)] = song  
+    for song in results:
+        song_id = song['id']
+        SONG_CACHE[song_id] = song  
 
-        title = song.get("name") or song.get("title") or "Unknown Title"
-        album = ""
-        if isinstance(song.get("album"), dict):
-            album = song["album"].get("name", "")
-        elif isinstance(song.get("album"), str):
-            album = song["album"]
+        title = song['title']
         
-        # Song Title First in Inline Button
-        btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
-        
+        # Song Title First in Button
+        btn_text = f"🎵 {title}"
         buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
 
     keyboard = InlineKeyboardMarkup(buttons)
@@ -186,86 +190,40 @@ async def callback_handler(client, query: CallbackQuery):
 
         await query.answer()
         
-        # Action indicator below bot name: Downloading
+        # Action indicator: Downloading
         await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.RECORD_AUDIO)
-        
-        # Status Message: downloading mp3 file
         await query.message.edit_text("📥 **downloading mp3 file...**")
 
         try:
-            title = song_data.get("name") or song_data.get("title") or "Audio Track"
-            
-            # Extract Artists
-            artists = "Unknown Artist"
-            if song_data.get("artists"):
-                if isinstance(song_data["artists"], dict) and "primary" in song_data["artists"]:
-                    artists = ", ".join([a.get("name", "") for a in song_data["artists"]["primary"]])
-                elif isinstance(song_data["artists"], list):
-                    artists = ", ".join([str(a.get("name", a)) for a in song_data["artists"]])
+            title = song_data['title']
+            artist = song_data['uploader']
+            video_url = song_data['url']
+            duration = song_data['duration']
 
-            # Extract Audio Download URL
-            audio_url = None
-            if "downloadUrl" in song_data:
-                urls = song_data["downloadUrl"]
-                if isinstance(urls, list) and len(urls) > 0:
-                    audio_url = urls[-1].get("url") or urls[-1].get("link")
-                elif isinstance(urls, str):
-                    audio_url = urls
-            elif "url" in song_data:
-                audio_url = song_data["url"]
-
-            # Extract Thumbnail URL
-            thumb_url = None
-            if "image" in song_data:
-                images = song_data["image"]
-                if isinstance(images, list) and len(images) > 0:
-                    if isinstance(images[-1], dict):
-                        thumb_url = images[-1].get("url") or images[-1].get("link")
-                    elif isinstance(images[-1], str):
-                        thumb_url = images[-1]
-                elif isinstance(images, str):
-                    thumb_url = images
-
-            if not audio_url:
-                await query.message.edit_text("❌ **Download link not available for this song.**")
-                return
-
+            file_base = f"downloads/{song_id}"
             file_path = f"downloads/{song_id}.mp3"
-            thumb_path = f"downloads/{song_id}.jpg" if thumb_url else None
 
             loop = asyncio.get_running_loop()
             
-            # Download MP3 File
-            await loop.run_in_executor(None, download_file, audio_url, file_path)
-            if thumb_url:
-                try:
-                    await loop.run_in_executor(None, download_file, thumb_url, thumb_path)
-                except Exception:
-                    pass
+            # Download Audio
+            await loop.run_in_executor(None, download_yt_audio, video_url, file_base)
 
-            # Action indicator below bot name: Sending Audio
+            # Action indicator: Sending Audio
             await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.UPLOAD_AUDIO)
-
-            # Status Message: file senting mp3 file
             await query.message.edit_text("📤 **file senting mp3 file...**")
-
-            duration = int(song_data.get("duration", 0))
 
             # Send Audio File
             await query.message.reply_audio(
                 audio=file_path,
-                caption=f"🎵 **{title}**\n🎤 **Artist:** {artists}\n\nDownloaded via Music Bot",
+                caption=f"🎵 **{title}**\n🎤 **Artist:** {artist}\n\nDownloaded via Music Bot",
                 title=title,
-                performer=artists,
-                duration=duration,
-                thumb=thumb_path if thumb_path and os.path.exists(thumb_path) else None
+                performer=artist,
+                duration=duration
             )
 
             # Cleanup local files
             if os.path.exists(file_path):
                 os.remove(file_path)
-            if thumb_path and os.path.exists(thumb_path):
-                os.remove(thumb_path)
 
             await query.message.delete()
 
@@ -280,7 +238,7 @@ if __name__ == "__main__":
 
     async def main():
         await app.start()
-        print("JioSaavn Music Bot is Running!")
+        print("Music Downloader Bot is Running!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
