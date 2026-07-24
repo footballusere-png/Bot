@@ -21,7 +21,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"YouTube Downloader Bot Active")
+        self.wfile.write(b"Free MP3 Music Downloader Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -40,20 +40,20 @@ API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 
-app = Client("YTMP3Bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("FreeMP3Bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Start Command
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message: Message):
     welcome = (
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🎵 **YouTube to MP3 Downloader**\n\n"
-        "Send me any **YouTube Link** or type a **Song Name**, and I will convert & send the MP3 audio to you!"
+        "🎵 **Free MP3 Music Downloader**\n\n"
+        "Send me any **Song Name** or **SoundCloud Link**, and I will download & send the high-quality MP3 audio to you!"
     )
     await message.reply_text(welcome)
 
-# Helper Function: Download Audio using yt-dlp
-def download_yt_audio(url_or_query):
+# SoundCloud / Free Engine Audio Downloader
+def download_free_audio(query):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': 'downloads/%(title)s.%(ext)s',
@@ -64,47 +64,46 @@ def download_yt_audio(url_or_query):
         }],
         'quiet': True,
         'no_warnings': True,
-        'default_search': 'ytsearch1', # Search YouTube if text query is sent
+        # YouTube-ന് പകരം SoundCloud-ൽ ഫ്രീയായി സെർച്ച് ചെയ്യുന്നു
+        'default_search': 'scsearch1', 
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url_or_query, download=True)
+        info = ydl.extract_info(query, download=True)
         if 'entries' in info:
             info = info['entries'][0]
         
         file_path = ydl.prepare_filename(info).rsplit('.', 1)[0] + ".mp3"
         title = info.get('title', 'Audio Track')
-        performer = info.get('uploader', 'YouTube')
+        performer = info.get('uploader', 'Artist')
         duration = int(info.get('duration', 0))
         
         return file_path, title, performer, duration
 
-# YouTube Download Handler
+# Search and Download Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
-async def handle_youtube_download(client, message: Message):
+async def handle_music_download(client, message: Message):
     query = message.text.strip()
     
-    status_msg = await message.reply_text("📥 **Processing & Downloading Audio... Please wait.**")
+    status_msg = await message.reply_text("📥 **Searching & Downloading Audio... Please wait.**")
 
     try:
-        # Run blocking download function in async thread
         loop = asyncio.get_running_loop()
         file_path, title, performer, duration = await loop.run_in_executor(
-            None, download_yt_audio, query
+            None, download_free_audio, query
         )
 
         await status_msg.edit_text("📤 **Uploading MP3 to Telegram...**")
 
-        # Send Audio File
         await message.reply_audio(
             audio=file_path,
-            caption=f"🎵 **{title}**\n\nDownloaded via MP3 Downloader Bot",
+            caption=f"🎵 **{title}**\n\nDownloaded via Music Downloader Bot",
             title=title,
             performer=performer,
             duration=duration
         )
 
-        # Cleanup downloaded file from server storage
+        # Download ചെയ്ത ശേഷം ഫയൽ സർവറിൽ നിന്ന് മായ്ക്കുന്നു
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -112,7 +111,7 @@ async def handle_youtube_download(client, message: Message):
 
     except Exception as e:
         logging.error(f"Download Error: {e}")
-        await status_msg.edit_text("❌ **Error:** Unable to download this track. YouTube might be restricting this query or IP.")
+        await status_msg.edit_text("❌ **Error:** Could not find or download this track. Please check the song name.")
 
 # ---------- BOT START ----------
 if __name__ == "__main__":
@@ -121,7 +120,7 @@ if __name__ == "__main__":
 
     async def main():
         await app.start()
-        print("YouTube MP3 Bot is Running!")
+        print("Free Music Bot is Running!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
