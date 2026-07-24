@@ -1,402 +1,102 @@
-import os
-import re
-import logging
-import threading
-import base64
 import asyncio
-import sqlite3
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import requests
-from bs4 import BeautifulSoup
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, 
-    CallbackQueryHandler, ConversationHandler, filters, ContextTypes
-)
-from telegram.error import TelegramError, Forbidden
-import yt_dlp
+# Python version compatibility fix
+asyncio.set_event_loop(asyncio.new_event_loop())
 
-# Logging setup
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+import dns.resolver
+# DNS resolution setup
+dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
-# --- CONFIGURATION ---
-ADMIN_ID = 7312906293  # Admin Telegram ID
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8766799282:AAGvt3bcF594txi6en6JzfMO1gCLHUpkE-E")
-DB_FILE = "bot_users.db"
+import logging
+from hydrogram import Client, filters
+from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pymongo import MongoClient
 
-# Conversation States for Broadcast
-WAITING_FOR_BROADCAST_MSG, CONFIRM_BROADCAST = range(2)
+# ---------- CONFIGURATION ----------
+API_ID = 28300966
+API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
+BOT_TOKEN = "8686380719:AAGoYkxNrtrZ034sGSPbMxEG39lMZuHIm9Y"
 
-# --- SQLITE DATABASE FUNCTIONS ---
-def init_sqlite_db():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                first_name TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        logger.info("SQLite DB Initialized Successfully!")
-    except Exception as e:
-        logger.error(f"SQLite Init Error: {e}")
+# MongoDB Connection URI
+MONGO_URI = "mongodb+srv://footballusere_db_user:Hnm6rRWbUHvhmbWd@cluster0.k2t3crf.mongodb.net/?appName=Cluster0"
+DB_NAME = "AutoFilterBot"
+# -----------------------------------
 
-def add_user_sqlite(user_id, first_name):
-    def save():
-        try:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO users (user_id, first_name) 
-                VALUES (?, ?)
-            ''', (user_id, first_name or "User"))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"SQLite Save Error: {e}")
-    threading.Thread(target=save, daemon=True).start()
+# MongoDB Connection Setup
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[DB_NAME]
+files_collection = db["files"]
 
-def get_all_users_sqlite():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM users')
-        rows = cursor.fetchall()
-        conn.close()
-        return [row[0] for row in rows]
-    except Exception as e:
-        logger.error(f"SQLite Fetch Error: {e}")
-        return []
+# Hydrogram Client Setup
+app = Client("AutoFilterBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- DUMMY SERVER FOR RENDER ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Pinterest Bot with SQLite is Active!")
+logging.basicConfig(level=logging.INFO)
 
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
-
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
-
-def get_full_url(url):
-    try:
-        res = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=10)
-        return res.url
-    except Exception as e:
-        return url
-
-def get_pinterest_media_direct(url):
-    full_url = get_full_url(url)
-    try:
-        res = requests.get(full_url, headers=HEADERS, timeout=10)
-        if res.status_code != 200:
-            return None, None
-
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        video_tag = soup.find('video')
-        if video_tag and video_tag.get('src'):
-            video_url = video_tag['src'].replace('/hls/', '/736x/').replace('.m3u8', '.mp4')
-            return video_url, 'video'
-            
-        meta_video = soup.find('meta', property='og:video:secure_url') or soup.find('meta', property='og:video')
-        if meta_video and meta_video.get('content'):
-            return meta_video['content'], 'video'
-
-        meta_image = soup.find('meta', property='og:image')
-        if meta_image and meta_image.get('content'):
-            img_url = meta_image['content']
-            img_url = re.sub(r'/(originals|\d+x)/', '/originals/', img_url)
-            return img_url, 'image'
-
-    except Exception as e:
-        logger.error(f"Direct scraping error: {e}")
-
-    return None, None
-
-def download_with_ytdlp(url):
-    os.makedirs("downloads", exist_ok=True)
-    ydl_opts = {
-        'outtmpl': 'downloads/%(id)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'format': 'bestvideo+bestaudio/best',
-        'check_formats': False,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        return filename
-
-def get_reply_markup():
-    keyboard = [
-        [
-            InlineKeyboardButton("📢 Updates Channel", url="https://t.me/moviestore_imdb_updates"),
-            InlineKeyboardButton("💬 Support Group", url="https://t.me/moviestoreimdb")
-        ],
-        [
-            InlineKeyboardButton("➕ Share Bot", url="https://t.me/share/url?url=Try%20this%20awesome%20Pinterest%20Downloader%20Bot!")
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user_sqlite(user.id, user.first_name)
-
-    if context.args and len(context.args) > 0:
-        encoded_url = context.args[0]
-        try:
-            url = base64.b64decode(encoded_url.encode('utf-8')).decode('utf-8')
-            await process_media_download(update, context, url)
-            return
-        except Exception as e:
-            logger.error(f"Base64 decode error: {e}")
-
-    welcome_text = (
-        "✨ **Welcome to Pinterest Downloader Pro!** ✨\n\n"
-        "Send me any Pinterest link, and I will download high-quality **Videos & Photos** instantly!\n\n"
-        "📖 **How to Use:**\n"
-        "1️⃣ Copy a video or photo link from **Pinterest**.\n"
-        "2️⃣ Paste and send it here.\n"
-        "3️⃣ Receive HD content in seconds! 🚀"
-    )
-    await update.message.reply_text(
-        welcome_text, 
-        parse_mode="Markdown", 
-        reply_markup=get_reply_markup(),
-        disable_web_page_preview=True
+# 1. /start Command Handling
+@app.on_message(filters.command("start") & filters.private)
+async def start_handler(client, message: Message):
+    await message.reply_text(
+        f"ഹലോ {message.from_user.first_name}!\n\n"
+        "ഞാൻ ഒരു **Auto-Filter Search Bot** ആണ്. ഫയലുകൾ സെർച്ച് ചെയ്യാൻ അതിൻ്റെ പേര് മാത്രം ടൈപ്പ് ചെയ്തു അയക്കൂ!"
     )
 
-# 👑 ADMIN PANEL COMMAND
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+# 2. ഫയലുകൾ Index ചെയ്യാനുള്ള System (Documents, Videos, Audio)
+@app.on_message(filters.document | filters.video | filters.audio)
+async def save_file(client, message: Message):
+    media = message.document or message.video or message.audio
+    if not media:
         return
 
-    admin_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Start Broadcast", callback_data="start_broadcast_flow")],
-        [InlineKeyboardButton("❌ Close Panel", callback_data="close_admin_panel")]
-    ])
-    await update.message.reply_text("👑 **Admin Panel:**\n\nതാഴെ കാണുന്ന ബട്ടൺ ക്ലിക്ക് ചെയ്ത് ബ്രോഡ്കാസ്റ്റ് ആരംഭിക്കാം:", reply_markup=admin_keyboard, parse_mode="Markdown")
+    file_name = media.file_name or "Unknown File"
+    file_id = media.file_id
+    file_size = media.file_size
 
-# Callback button Handler for Admin Panel
-async def admin_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "start_broadcast_flow":
-        if query.from_user.id != ADMIN_ID:
-            return ConversationHandler.END
-
-        cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")]])
-        await query.edit_message_text(
-            "📝 **നിങ്ങൾക്ക് ആളുകൾക്ക് അയക്കേണ്ട മെസ്സേജ്/ഫോട്ടോ/വീഡിയോ ഇപ്പോൾ ഇവിടെ അയക്കുക...**", 
-            reply_markup=cancel_btn,
-            parse_mode="Markdown"
-        )
-        return WAITING_FOR_BROADCAST_MSG
-
-    elif query.data == "close_admin_panel":
-        await query.message.delete()
-        return ConversationHandler.END
-
-# Step 1: Message ലഭിച്ചാൽ Confirm ചെയ്യാൻ ചോദിക്കുക
-async def receive_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return ConversationHandler.END
-
-    context.user_data['broadcast_chat_id'] = update.message.chat_id
-    context.user_data['broadcast_msg_id'] = update.message.message_id
-
-    confirm_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirm & Send", callback_data="confirm_send_broadcast"),
-            InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")
-        ]
-    ])
-
-    await update.message.reply_text(
-        "⚠️ **ഈ മെസ്സേജ് എല്ലാ യൂസേഴ്സിനും അയക്കണമെന്ന് ഉറപ്പാണോ?**", 
-        reply_to_message_id=update.message.message_id,
-        reply_markup=confirm_keyboard,
-        parse_mode="Markdown"
-    )
-    return CONFIRM_BROADCAST
-
-# Step 2: Confirmation Handle ചെയ്യുക
-async def handle_broadcast_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "confirm_send_broadcast":
-        await query.edit_message_text("🚀 **Broadcast ആരംഭിക്കുന്നു... ദയവായി കാത്തിരിക്കുക!**")
-
-        msg_id = context.user_data.get('broadcast_msg_id')
-        from_chat_id = context.user_data.get('broadcast_chat_id')
-
-        users = get_all_users_sqlite()
-
-        if not users:
-            await query.edit_message_text("❌ ഡാറ്റാബേസിൽ യൂസേഴ്സ് ആരും ഇല്ല.")
-            return ConversationHandler.END
-
-        success = 0
-        failed = 0
-
-        for u_id in users:
-            try:
-                await context.bot.copy_message(
-                    chat_id=int(u_id),
-                    from_chat_id=from_chat_id,
-                    message_id=msg_id
-                )
-                success += 1
-                await asyncio.sleep(0.15)
-            except Exception:
-                failed += 1
-                continue
-
-        await query.edit_message_text(
-            f"✅ **Broadcast പൂർത്തിയായി!**\n\n"
-            f"🎯 വിജയിച്ചവ: `{success}`\n"
-            f"❌ പരാജയപ്പെട്ടവ: `{failed}`",
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END
-
-    elif query.data == "cancel_broadcast":
-        await query.edit_message_text("❌ **Broadcast റദ്ദാക്കി.**")
-        return ConversationHandler.END
-
-async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ **Broadcast റദ്ദാക്കി.**")
-    return ConversationHandler.END
-
-async def process_media_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
-    status_msg = await update.message.reply_text("⏳ **Downloading media... Please wait!**", parse_mode="Markdown")
-
-    file_path = None
-    try:
-        media_url, media_type = get_pinterest_media_direct(url)
-
-        if media_url:
-            extension = "mp4" if media_type == 'video' else "jpg"
-            os.makedirs("downloads", exist_ok=True)
-            file_path = f"downloads/temp_{update.message.message_id}.{extension}"
-
-            res = requests.get(media_url, headers=HEADERS, stream=True)
-            if res.status_code == 200:
-                with open(file_path, 'wb') as f:
-                    for chunk in res.iter_content(chunk_size=1024):
-                        f.write(chunk)
-
-        if not file_path or not os.path.exists(file_path):
-            try:
-                full_url = get_full_url(url)
-                file_path = download_with_ytdlp(full_url)
-                media_type = 'video' if file_path.endswith(('.mp4', '.mkv', '.webm')) else 'image'
-            except Exception as yt_err:
-                logger.error(f"yt-dlp error: {yt_err}")
-
-        if file_path and os.path.exists(file_path):
-            caption = "🚀 **Downloaded via Pinterest Downloader Bot**\n\nJoin @moviestore_imdb_updates for more!"
-            with open(file_path, 'rb') as file:
-                if media_type == 'video':
-                    await update.message.reply_video(video=file, caption=caption, parse_mode="Markdown", reply_markup=get_reply_markup())
-                else:
-                    await update.message.reply_photo(photo=file, caption=caption, parse_mode="Markdown", reply_markup=get_reply_markup())
-
-            await status_msg.delete()
-        else:
-            await status_msg.edit_text("❌ **Download Failed!** Make sure the Pinterest post is public.", parse_mode="Markdown")
-
-    except Exception as e:
-        logger.error(f"Error processing link: {e}")
-        await status_msg.edit_text("❌ Something went wrong while downloading.", parse_mode="Markdown")
-    finally:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user_sqlite(user.id, user.first_name)
-
-    url = update.message.text.strip()
-    chat_type = update.effective_chat.type
-
-    if "pinterest.com" not in url and "pin.it" not in url:
-        if chat_type == 'private':
-            await update.message.reply_text("⚠️ **Please send a valid Pinterest URL.**", parse_mode="Markdown")
-        return
-
-    if chat_type in ['group', 'supergroup']:
-        encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
-        bot_username = (await context.bot.get_me()).username
-        pm_link = f"https://t.me/{bot_username}?start={encoded_url}"
-
-        group_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📥 Get Your Media (Private Chat)", url=pm_link)]
-        ])
-
-        await update.message.reply_text(
-            f"👋 Hello {update.effective_user.first_name}!\n\n"
-            "Click the button below to get your downloaded photo/video in private chat! 👇",
-            reply_markup=group_keyboard,
-            reply_to_message_id=update.message.message_id
-        )
+    # ഡാറ്റാബേസിൽ ഫയൽ ഉണ്ടോ എന്ന് പരിശോധിച്ച് ഇല്ലെങ്കിൽ മാത്രം ചേർക്കുന്നു
+    if not files_collection.find_one({"file_id": file_id}):
+        files_collection.insert_one({
+            "file_name": file_name,
+            "file_id": file_id,
+            "file_size": file_size
+        })
+        await message.reply_text(f"✅ ഫയൽ ഡാറ്റാബേസിൽ സേവ് ചെയ്തു: `{file_name}`", quote=True)
     else:
-        await process_media_download(update, context, url)
+        await message.reply_text("ℹ️ ഈ ഫയൽ മുൻപേ സേവ് ചെയ്തതാണ്.", quote=True)
 
-def main():
-    init_sqlite_db()
-    threading.Thread(target=run_dummy_server, daemon=True).start()
+# 3. Auto-Filter Search System
+@app.on_message(filters.text & filters.private & ~filters.command(["start"]))
+async def filter_search(client, message: Message):
+    query = message.text.strip()
+    
+    # MongoDB-യിൽ സെർച്ച് ചെയ്യുന്നു (Case-insensitive)
+    results = list(files_collection.find({"file_name": {"$regex": query, "$options": "i"}}).limit(10))
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    if not results:
+        await message.reply_text("❌ ക്ഷമിക്കണം, നിങ്ങൾ തിരഞ്ഞ ഫയൽ കണ്ടെത്താനായില്ല.")
+        return
 
-    broadcast_handler = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(admin_button_click, pattern="^start_broadcast_flow$")
-        ],
-        states={
-            WAITING_FOR_BROADCAST_MSG: [
-                MessageHandler(filters.ALL & ~filters.COMMAND, receive_broadcast_message)
-            ],
-            CONFIRM_BROADCAST: [
-                CallbackQueryHandler(handle_broadcast_confirmation, pattern="^(confirm_send_broadcast|cancel_broadcast)$")
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel_broadcast),
-            CallbackQueryHandler(handle_broadcast_confirmation, pattern="^cancel_broadcast$")
-        ],
-        per_message=False
-    )
+    # Results Inline Buttons ആയി നൽകുന്നു
+    buttons = []
+    for file in results:
+        btn_text = f"📁 {file['file_name']}"
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"getfile_{file['_id']}")])
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(broadcast_handler)
-    app.add_handler(CallbackQueryHandler(admin_button_click, pattern="^close_admin_panel$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await message.reply_text(f"🔍 **'{query}'** എന്ന തിരച്ചിലിന്റെ റിസൾട്ടുകൾ:", reply_markup=reply_markup)
 
-    print("Bot running with SQLite Database...")
-    app.run_polling(drop_pending_updates=True)
+# 4. Button ക്ലിക്ക് ചെയ്യുമ്പോൾ ഫയൽ സെൻഡ് ചെയ്യുന്നത്
+@app.on_callback_query(filters.regex(r"^getfile_"))
+async def send_file_handler(client, callback_query):
+    from bson.objectid import ObjectId
+    file_id_db = callback_query.data.split("_")[1]
+    
+    file_data = files_collection.find_one({"_id": ObjectId(file_id_db)})
+    if file_data:
+        await callback_query.message.reply_cached_media(file_data["file_id"])
+        await callback_query.answer("ഫയൽ അയച്ചിട്ടുണ്ട്!")
+    else:
+        await callback_query.answer("ഫയൽ കണ്ടെത്താനായില്ല!", show_alert=True)
 
+# Bot റൺ ചെയ്യുന്നു
 if __name__ == "__main__":
-    main()
+    print("Bot Started Successfully!")
+    app.run()
