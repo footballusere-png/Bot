@@ -38,7 +38,7 @@ Thread(target=run_web_server, daemon=True).start()
 # ---------- CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
-BOT_TOKEN = "8686380719:AAGXFrU7MymK59RXU8iioBAAqn4O_fLuYtk"
+BOT_TOKEN = "8686380719:AAHrxdtU0YDGxu4Og3MelWaJTy6_qdCgs34"
 
 # ചാനൽ ID
 CHANNEL_ID = -1004320858359
