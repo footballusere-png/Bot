@@ -15,7 +15,7 @@ from pymongo import MongoClient
 # ---------- CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
-BOT_TOKEN = "8686380719:AAGoYkxNrtrZ034sGSPbMxEG39lMZuHIm9Y"
+BOT_TOKEN = "8686380719:AAGXFrU7MymK59RXU8iioBAAqn4O_fLuYtk"
 
 # MongoDB Connection URI
 MONGO_URI = "mongodb+srv://footballusere_db_user:Hnm6rRWbUHvhmbWd@cluster0.k2t3crf.mongodb.net/?appName=Cluster0"
