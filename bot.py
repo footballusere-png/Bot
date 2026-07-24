@@ -1,12 +1,12 @@
 import os
 import asyncio
 import logging
+import requests
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from hydrogram.errors import UserNotParticipant
-import yt_dlp
 
 # Asyncio Event Loop Fix for Python 3.14+
 try:
@@ -22,7 +22,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Professional Music Downloader Active")
+        self.wfile.write(b"JioSaavn Music Bot Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -42,12 +42,12 @@ API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 CHANNEL_ID = -1004320858359  # നിങ്ങളുടെ ചാനൽ ID
 
-app = Client("ProMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("JioSaavnMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Temporary Memory for Search Results
-SEARCH_CACHE = {}
+# Temporary Memory Store for Songs
+SONG_CACHE = {}
 
-# Helper: Check Force Subscribe
+# Check Force Subscribe Status
 async def check_force_sub(client, user_id):
     try:
         member = await client.get_chat_member(CHANNEL_ID, user_id)
@@ -65,64 +65,45 @@ async def check_force_sub(client, user_id):
 async def start_cmd(client, message: Message):
     welcome = (
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🎶 **Welcome to Professional Music Downloader Bot**\n\n"
-        "Send me any **Song Name**, and I will give you top search results with instant MP3 download buttons!"
+        "🎵 **Professional Music Downloader Bot**\n\n"
+        "Send me any **Song Name**, and I'll find the exact track for you in high quality!"
     )
     await message.reply_text(welcome)
 
-# Helper Function: Search Top 5 Tracks from SoundCloud
-def search_soundcloud_top5(query):
-    ydl_opts = {
-        'extract_flat': True,
-        'quiet': True,
-        'no_warnings': True,
-        'allowed_extractors': ['soundcloud', 'soundcloud:search'],
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"scsearch5:{query}", download=False)
-        results = []
-        if 'entries' in info:
-            for entry in info['entries'][:5]:
-                results.append({
-                    'id': entry.get('id'),
-                    'title': entry.get('title', 'Unknown Title'),
-                    'url': entry.get('url') or entry.get('webpage_url')
-                })
-        return results
+# JioSaavn API Search Function
+def search_jiosaavn(query):
+    url = f"https://saavn.dev/api/search/songs?query={query}&limit=5"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        if data.get("success") and data.get("data", {}).get("results"):
+            return data["data"]["results"]
+    except Exception as e:
+        logging.error(f"JioSaavn API Error: {e}")
+    return []
 
-# Helper Function: Download Specific Track
-def download_sc_track(track_url):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '320',
-        }],
-        'quiet': True,
-        'no_warnings': True,
-        'allowed_extractors': ['soundcloud'],
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(track_url, download=True)
-        file_path = ydl.prepare_filename(info).rsplit('.', 1)[0] + ".mp3"
-        title = info.get('title', 'Audio Track')
-        performer = info.get('uploader', 'Artist')
-        duration = int(info.get('duration', 0))
-        return file_path, title, performer, duration
+# Download File Function
+def download_file(url, destination):
+    res = requests.get(url, stream=True)
+    with open(destination, 'wb') as f:
+        for chunk in res.iter_content(chunk_size=1024):
+            if chunk:
+                f.write(chunk)
 
 # Search Handler
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def handle_search(client, message: Message):
     user_id = message.from_user.id
 
-    # Check Force Sub
+    # Force Subscribe Check
     is_joined = await check_force_sub(client, user_id)
     if not is_joined:
-        chat = await client.get_chat(CHANNEL_ID)
-        invite_link = chat.invite_link or f"https://t.me/c/{str(CHANNEL_ID)[4:]}"
-        
+        try:
+            chat = await client.get_chat(CHANNEL_ID)
+            invite_link = chat.invite_link or f"https://t.me/c/{str(CHANNEL_ID)[4:]}"
+        except Exception:
+            invite_link = "https://t.me"
+
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Join Our Channel", url=invite_link)],
             [InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")]
@@ -134,37 +115,37 @@ async def handle_search(client, message: Message):
         return
 
     query = message.text.strip()
-    status_msg = await message.reply_text("🔍 **Searching song...**")
+    
+    # Custom Search Status Message
+    status_msg = await message.reply_text("🔍 **serching song...**")
 
-    try:
-        loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(None, search_soundcloud_top5, query)
+    loop = asyncio.get_running_loop()
+    results = await loop.run_in_executor(None, search_jiosaavn, query)
 
-        if not results:
-            await status_msg.edit_text("❌ **No results found for this song name.**")
-            return
+    if not results:
+        await status_msg.edit_text("❌ **No exact songs found. Please check the spelling.**")
+        return
 
-        buttons = []
-        for idx, item in enumerate(results):
-            # Save URL in memory cache
-            cache_key = f"{user_id}_{idx}"
-            SEARCH_CACHE[cache_key] = item['url']
-            
-            # Add inline button for each song
-            btn_text = f"🎵 {idx+1}. {item['title'][:40]}"
-            buttons.append([InlineKeyboardButton(btn_text, callback_data=f"dl_{cache_key}")])
+    buttons = []
+    for idx, song in enumerate(results):
+        song_id = song["id"]
+        SONG_CACHE[song_id] = song  # Save song data in cache
 
-        keyboard = InlineKeyboardMarkup(buttons)
-        await status_msg.edit_text(
-            f"🔎 **Search Results for:** `{query}`\n👇 Click a song below to download MP3:",
-            reply_markup=keyboard
-        )
+        title = song.get("name", "Unknown Title")
+        album = song.get("album", {}).get("name", "")
+        
+        # Display Title First
+        btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
+        
+        buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
 
-    except Exception as e:
-        logging.error(f"Search Error: {e}")
-        await status_msg.edit_text("❌ **Error occurred while searching.**")
+    keyboard = InlineKeyboardMarkup(buttons)
+    await status_msg.edit_text(
+        f"🎯 **Select your song below:**",
+        reply_markup=keyboard
+    )
 
-# Callback Handler (Button Clicks)
+# Callback Query Handler (Button Click)
 @app.on_callback_query()
 async def callback_handler(client, query: CallbackQuery):
     data = query.data
@@ -178,32 +159,68 @@ async def callback_handler(client, query: CallbackQuery):
         return
 
     if data.startswith("dl_"):
-        cache_key = data.replace("dl_", "")
-        track_url = SEARCH_CACHE.get(cache_key)
+        song_id = data.replace("dl_", "")
+        song_data = SONG_CACHE.get(song_id)
 
-        if not track_url:
+        if not song_data:
             await query.answer("❌ Search expired. Please search for the song again.", show_alert=True)
             return
 
         await query.answer()
-        await query.message.edit_text("📤 **Sending MP3...**")
+        
+        # Step 1: Downloading Status
+        await query.message.edit_text("📥 **downloading song...**")
 
         try:
-            loop = asyncio.get_running_loop()
-            file_path, title, performer, duration = await loop.run_in_executor(
-                None, download_sc_track, track_url
-            )
+            title = song_data.get("name", "Audio Track")
+            
+            # Extract Artists
+            artists = "Unknown Artist"
+            if song_data.get("artists", {}).get("primary"):
+                artists = ", ".join([a["name"] for a in song_data["artists"]["primary"]])
 
+            # Audio Download URL (320kbps/Best Quality)
+            download_urls = song_data.get("downloadUrl", [])
+            audio_url = download_urls[-1]["url"] if download_urls else None
+
+            # Thumbnail Image URL
+            image_urls = song_data.get("image", [])
+            thumb_url = image_urls[-1]["url"] if image_urls else None
+
+            if not audio_url:
+                await query.message.edit_text("❌ **Download link not available for this song.**")
+                return
+
+            file_path = f"downloads/{song_id}.mp3"
+            thumb_path = f"downloads/{song_id}.jpg" if thumb_url else None
+
+            loop = asyncio.get_running_loop()
+            
+            # Download MP3 and Thumbnail
+            await loop.run_in_executor(None, download_file, audio_url, file_path)
+            if thumb_url:
+                await loop.run_in_executor(None, download_file, thumb_url, thumb_path)
+
+            # Step 2: Sharing Status
+            await query.message.edit_text("📤 **file sharing mp3...**")
+
+            duration = int(song_data.get("duration", 0))
+
+            # Send Audio File
             await query.message.reply_audio(
                 audio=file_path,
-                caption=f"🎵 **{title}**\n\nDownloaded via Music Bot",
+                caption=f"🎵 **{title}**\n🎤 **Artist:** {artists}\n\nDownloaded via Music Bot",
                 title=title,
-                performer=performer,
-                duration=duration
+                performer=artists,
+                duration=duration,
+                thumb=thumb_path if thumb_path and os.path.exists(thumb_path) else None
             )
 
+            # Cleanup
             if os.path.exists(file_path):
                 os.remove(file_path)
+            if thumb_path and os.path.exists(thumb_path):
+                os.remove(thumb_path)
 
             await query.message.delete()
 
@@ -218,7 +235,7 @@ if __name__ == "__main__":
 
     async def main():
         await app.start()
-        print("Pro Music Bot is Running!")
+        print("JioSaavn Music Bot is Running!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
