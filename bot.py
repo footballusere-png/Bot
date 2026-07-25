@@ -23,7 +23,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Kerala Syllabus Textbooks Bot Active")
+        self.wfile.write(b"Kerala Syllabus Premium Bot Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -43,20 +43,19 @@ RTDB_URL = "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
 # ---------- BOT CONFIGURATION ----------
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
-BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
+BOT_TOKEN = "8769518045:AAFcvFaf4s14_AVGP8xSfho6LkryfRChMgs"
 
 ADMIN_ID = 7312906293  # Telegram User ID
 
-# ഗ്രൂപ്പ്, ചാനൽ ഐഡികൾ
 GROUP_ID = -1002702148703
 CHANNEL_ID = -1003938671650
 
-app = Client("KeralaSyllabusBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("KeralaSyllabusPremiumBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # ---------------- FORCE SUBSCRIBE CHECK ----------------
 async def check_force_sub(client, user_id):
     try:
-        # Group Member Check
+        # Group Check
         try:
             member1 = await client.get_chat_member(GROUP_ID, user_id)
             if member1.status in ["kicked", "left"]:
@@ -66,7 +65,7 @@ async def check_force_sub(client, user_id):
         except Exception as e:
             logging.error(f"Group Check Error: {e}")
 
-        # Channel Member Check
+        # Channel Check
         try:
             member2 = await client.get_chat_member(CHANNEL_ID, user_id)
             if member2.status in ["kicked", "left"]:
@@ -81,17 +80,15 @@ async def check_force_sub(client, user_id):
         logging.error(f"Force Sub General Error: {e}")
         return True
 
-# ---------------- AUTO APPROVE JOIN REQUEST (NO DM MESSAGE) ----------------
+# ---------------- AUTO APPROVE JOIN REQUEST ----------------
 @app.on_chat_join_request()
 async def handle_join_request(client, request: ChatJoinRequest):
     user_id = request.from_user.id
     chat_id = request.chat.id
 
     try:
-        # Join Request ഓട്ടോമാറ്റിക്കായി Approve ചെയ്യുന്നു
         await client.approve_chat_join_request(chat_id, user_id)
         
-        # യൂസറെ ഫയർബേസിൽ മാത്രം സേവ് ചെയ്യുന്നു
         user_data = {
             "user_id": user_id, 
             "name": request.from_user.first_name,
@@ -100,6 +97,81 @@ async def handle_join_request(client, request: ChatJoinRequest):
         requests.put(f"{RTDB_URL}/users/{user_id}.json", json=user_data)
     except Exception as e:
         logging.error(f"Join Request Error: {e}")
+
+# ---------------- START & MENU COMMAND ----------------
+@app.on_message(filters.command(["start", "textbooks"]) & filters.private)
+async def start_cmd(client, message: Message):
+    user_id = message.from_user.id
+
+    user_data = {"user_id": user_id, "name": message.from_user.first_name}
+    requests.put(f"{RTDB_URL}/users/{user_id}.json", json=user_data)
+
+    welcome_text = (
+        f"✨ **നമസ്കാരം {message.from_user.first_name}!**\n\n"
+        "📚 **കേരള സിലബസ് പാഠപുസ്തകങ്ങളിലേക്കും പഠനവിഭവങ്ങളിലേക്കും സ്വാഗതം!**\n\n"
+        "🔍 **സെർച്ച് ചെയ്യാൻ:** `/search [Subject/Class]` എന്ന് ടൈപ്പ് ചെയ്യുക.\n"
+        "ഉദാഹരണത്തിന്: `/search Math` അല്ലെങ്കിൽ `/search 10`\n\n"
+        "താഴെയുള്ള ബട്ടണുകൾ ഉപയോഗിച്ച് പുസ്തകങ്ങൾ തിരഞ്ഞെടുക്കാം 👇"
+    )
+
+    main_buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📚 Textbooks (ക്ലാസ്സ് 1 - 10)", callback_data="btn_textbooks")],
+        [InlineKeyboardButton("📝 Notes & Question Papers", callback_data="btn_notes")],
+        [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
+    ])
+
+    await message.reply_text(welcome_text, reply_markup=main_buttons)
+
+# ---------------- FEATURE 1: LIVE SEARCH COMMAND ----------------
+@app.on_message(filters.command("search") & filters.private)
+async def search_cmd(client, message: Message):
+    user_id = message.from_user.id
+    is_joined = await check_force_sub(client, user_id)
+    if not is_joined:
+        await message.reply_text("⚠️ **തുടരുന്നതിനായി ദയവായി ഗ്രൂപ്പിലും ചാനലിലും ജോയിൻ ചെയ്യുക!**")
+        return
+
+    if len(message.command) < 2:
+        await message.reply_text("⚠️ **ഉപയോഗിക്കേണ്ട രീതി:**\n`/search [Subject/Class]`\n📌 Example: `/search Malayalam`")
+        return
+
+    query = message.text.split(maxsplit=1)[1].lower()
+    res = requests.get(f"{RTDB_URL}/textbooks.json")
+
+    buttons = []
+    if res.status_code == 200 and res.json():
+        all_books = res.json()
+        for key, item in all_books.items():
+            search_target = f"class {item.get('class')} {item.get('subject')} {item.get('part')}".lower()
+            if query in search_target or query in str(item.get("class")):
+                btn_title = f"📘 Class {item['class']} - {item['subject']} ({item['part']})"
+                buttons.append([InlineKeyboardButton(btn_title, callback_data=f"getpdf_{key}")])
+
+    if buttons:
+        buttons.append([InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")])
+        await message.reply_text(f"🔍 **'{query}' സെർച്ച് റിസൾട്ടുകൾ:**", reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await message.reply_text(f"❌ **'{query}' എന്ന് തിരഞ്ഞ പുസ്തകങ്ങൾ ഒന്നും കണ്ടെത്താനായില്ല.**")
+
+# ---------------- FEATURE 2: ADMIN STATS COMMAND ----------------
+@app.on_message(filters.command("stats") & filters.private)
+async def stats_cmd(client, message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    res_users = requests.get(f"{RTDB_URL}/users.json")
+    res_books = requests.get(f"{RTDB_URL}/textbooks.json")
+
+    total_users = len(res_users.json()) if res_users.status_code == 200 and res_users.json() else 0
+    total_books = len(res_books.json()) if res_books.status_code == 200 and res_books.json() else 0
+
+    stats_msg = (
+        "📊 **Bot Realtime Statistics:**\n\n"
+        f"👥 **Total Users:** `{total_users}`\n"
+        f"📚 **Total Textbooks Uploaded:** `{total_books}`\n"
+        f"🟢 **Bot Status:** Active & Live"
+    )
+    await message.reply_text(stats_msg)
 
 # ---------------- ADMIN COMMAND: ADD TEXTBOOK ----------------
 @app.on_message(filters.command("add") & filters.private)
@@ -110,7 +182,7 @@ async def add_textbook_cmd(client, message: Message):
     if not message.reply_to_message or not message.reply_to_message.document:
         await message.reply_text(
             "⚠️ **ഉപയോഗിക്കേണ്ട രീതി:**\n"
-            "ചാനലിൽ നിന്നുള്ള PDF ഫയലിന് Reply ആയി താഴെ കാണുന്ന രീതിയിൽ ടൈപ്പ് ചെയ്യുക:\n\n"
+            "PDF ഫയലിന് Reply ആയി നൽകുക:\n\n"
             "`/add [Class] [Subject] [Part]`\n\n"
             "📌 **Example:** `/add 1 Malayalam Part-1`"
         )
@@ -139,61 +211,25 @@ async def add_textbook_cmd(client, message: Message):
 
     node_key = f"std_{class_num}_{subject}_{part}".replace(" ", "_").replace("-", "_")
 
-    # Realtime Database-ലേക്ക് ഡാറ്റ സേവ് ചെയ്യുന്നു
     rtdb_endpoint = f"{RTDB_URL}/textbooks/{node_key}.json"
     res = requests.put(rtdb_endpoint, json=data)
 
     if res.status_code == 200:
         await message.reply_text(
-            f"✅ **പാഠപുസ്തകം റിയൽ ടൈം ഡാറ്റാബേസിലേക്ക് ചേർത്തു!**\n\n"
+            f"✅ **പാഠപുസ്തകം ഡാറ്റാബേസിലേക്ക് ചേർത്തു!**\n\n"
             f"🏫 **Class:** {class_num}\n"
             f"📖 **Subject:** {subject}\n"
             f"📑 **Part:** {part}\n"
             f"📁 **File Name:** {file_name}"
         )
     else:
-        await message.reply_text("❌ **Realtime Database-ലേക്ക് ആഡ് ചെയ്യാൻ സാധിച്ചില്ല.**")
-
-# ---------------- START COMMAND ----------------
-@app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message: Message):
-    user_id = message.from_user.id
-
-    # Save user to Realtime Database
-    user_data = {"user_id": user_id, "name": message.from_user.first_name}
-    requests.put(f"{RTDB_URL}/users/{user_id}.json", json=user_data)
-
-    welcome_text = (
-        f"👋 **നമസ്കാരം {message.from_user.first_name}!**\n\n"
-        "📚 **കേരള സിലബസ് പാഠപുസ്തകങ്ങളിലേക്ക് സ്വാഗതം!**\n\n"
-        "താഴെ നൽകിയിരിക്കുന്ന ബട്ടണുകളിൽ ക്ലിക്ക് ചെയ്ത് പാഠപുസ്തകങ്ങൾ ഡൗൺലോഡ് ചെയ്യാം."
-    )
-
-    main_buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📚 Textbooks (ക്ലാസ്സ് 1 - 10)", callback_data="btn_textbooks")],
-        [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
-    ])
-
-    await message.reply_text(welcome_text, reply_markup=main_buttons)
+        await message.reply_text("❌ **Realtime Database-ലേക്ക് ചേർക്കാൻ സാധിച്ചില്ല.**")
 
 # ---------------- CALLBACK HANDLER ----------------
 @app.on_callback_query()
 async def callback_handler(client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
-
-    if data == "check_sub":
-        is_joined = await check_force_sub(client, user_id)
-        if is_joined:
-            await query.answer("✅ Verified Successfully!", show_alert=True)
-            main_buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📚 Textbooks (ക്ലാസ്സ് 1 - 10)", callback_data="btn_textbooks")],
-                [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
-            ])
-            await query.message.edit_text("✅ **പരിശോധന പൂർത്തിയായി!**", reply_markup=main_buttons)
-        else:
-            await query.answer("❌ നിങ്ങൾ ചാനലിലും ഗ്രൂപ്പിലും ജോയിൻ ചെയ്തിട്ടില്ല!", show_alert=True)
-        return
 
     is_joined = await check_force_sub(client, user_id)
     if not is_joined:
@@ -212,7 +248,7 @@ async def callback_handler(client, query: CallbackQuery):
         ])
         await query.message.edit_text("📖 **നിങ്ങളുടെ ക്ലാസ്സ് തിരഞ്ഞെടുക്കുക:**", reply_markup=buttons)
 
-    # Fetch Books for selected Class from Realtime Database
+    # Fetch Books from Realtime Database
     elif data.startswith("std_"):
         class_num = data.replace("std_", "")
         
@@ -256,6 +292,17 @@ async def callback_handler(client, query: CallbackQuery):
         else:
             await query.answer("❌ File not found in Realtime Database!", show_alert=True)
 
+    elif data == "btn_notes":
+        notes_text = (
+            "📝 **നോട്ടുകളും ക്വസ്റ്റ്യൻ പേപ്പറുകളും (Study Materials):**\n\n"
+            "• **SSLC Model Question Papers**\n"
+            "• **Chapter-wise Revision Notes**\n"
+            "• **Answer Keys & Question Banks**\n\n"
+            "📌 ഈ വിഭവങ്ങൾ ഉടൻ തന്നെ ബോട്ടിൽ അപ്‌ലോഡ് ചെയ്യുന്നതായിരിക്കും!"
+        )
+        buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]])
+        await query.message.edit_text(notes_text, reply_markup=buttons)
+
     elif data == "btn_news":
         news_text = (
             "📰 **സ്കൂൾ വാർത്തകളും വിവരങ്ങളും (Live Updates):**\n\n"
@@ -264,14 +311,13 @@ async def callback_handler(client, query: CallbackQuery):
             "• **വിദ്യാഭ്യാസ അറിയിപ്പുകൾ**\n\n"
             "എല്ലാ വിവരങ്ങളും ലൈവ് ആയി കാണാൻ ചാനലിലേക്ക് സ്വാഗതം!"
         )
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
-        ])
+        buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]])
         await query.message.edit_text(news_text, reply_markup=buttons)
 
     elif data == "main_menu":
         main_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("📚 Textbooks (ക്ലാസ്സ് 1 - 10)", callback_data="btn_textbooks")],
+            [InlineKeyboardButton("📝 Notes & Question Papers", callback_data="btn_notes")],
             [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
         ])
         await query.message.edit_text("🎯 **Main Menu:**", reply_markup=main_buttons)
@@ -307,7 +353,6 @@ if __name__ == "__main__":
     async def main():
         await app.start()
         
-        # ചാനലും ഗ്രൂപ്പും ആരംഭിയിൽ തന്നെ വോം-അപ്പ് (Warm Up/Fetch) ചെയ്ത് ക്യാഷ് ചെയ്യുന്നു
         try:
             await app.get_chat(GROUP_ID)
             await app.get_chat(CHANNEL_ID)
@@ -315,13 +360,14 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error loading initial chats: {e}")
 
-        # ടെലിഗ്രാം മെനുവിൽ 'Menu', 'Textbooks' മാത്രം നൽകുന്നു
+        # Set Telegram Menu Commands
         await app.set_bot_commands([
-            BotCommand("start", "🏠 Menu & Main Options"),
+            BotCommand("start", "🏠 Main Menu"),
+            BotCommand("search", "🔍 Search Textbooks"),
             BotCommand("textbooks", "📚 Textbooks (ക്ലാസ്സ് 1 - 10)")
         ])
         
-        print("Bot Started Successfully!")
+        print("Premium Bot Started Successfully!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
