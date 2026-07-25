@@ -47,7 +47,7 @@ BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 
 ADMIN_ID = 7312906293  # Telegram User ID
 
-# ഇവിടെ ഐഡിക്ക് പകരമായി നിങ്ങളുടെ ഗ്രൂപ്പിന്റെയും ചാനലിന്റെയും യൂസർനെയിം നൽകുക (ഉദാഹരണത്തിന്: "@my_channel")
+# ഗ്രൂപ്പ്, ചാനൽ ഐഡികൾ
 GROUP_ID = -1002702148703
 CHANNEL_ID = -1003938671650
 
@@ -56,19 +56,29 @@ app = Client("KeralaSyllabusBot", api_id=API_ID, api_hash=API_HASH, bot_token=BO
 # ---------------- FORCE SUBSCRIBE CHECK ----------------
 async def check_force_sub(client, user_id):
     try:
-        member1 = await client.get_chat_member(GROUP_ID, user_id)
-        if member1.status in ["kicked", "left"]:
+        # Group Member Check
+        try:
+            member1 = await client.get_chat_member(GROUP_ID, user_id)
+            if member1.status in ["kicked", "left"]:
+                return False
+        except UserNotParticipant:
             return False
-        
-        member2 = await client.get_chat_member(CHANNEL_ID, user_id)
-        if member2.status in ["kicked", "left"]:
+        except Exception as e:
+            logging.error(f"Group Check Error: {e}")
+
+        # Channel Member Check
+        try:
+            member2 = await client.get_chat_member(CHANNEL_ID, user_id)
+            if member2.status in ["kicked", "left"]:
+                return False
+        except UserNotParticipant:
             return False
+        except Exception as e:
+            logging.error(f"Channel Check Error: {e}")
 
         return True
-    except UserNotParticipant:
-        return False
     except Exception as e:
-        logging.error(f"Force Sub Error: {e}")
+        logging.error(f"Force Sub General Error: {e}")
         return True
 
 # ---------------- AUTO APPROVE JOIN REQUEST (NO DM MESSAGE) ----------------
@@ -81,7 +91,7 @@ async def handle_join_request(client, request: ChatJoinRequest):
         # Join Request ഓട്ടോമാറ്റിക്കായി Approve ചെയ്യുന്നു
         await client.approve_chat_join_request(chat_id, user_id)
         
-        # യൂസറെ മെസ്സേജ് അയക്കാതെ ഫയർബേസിൽ മാത്രം സേവ് ചെയ്യുന്നു
+        # യൂസറെ ഫയർബേസിൽ മാത്രം സേവ് ചെയ്യുന്നു
         user_data = {
             "user_id": user_id, 
             "name": request.from_user.first_name,
@@ -297,13 +307,21 @@ if __name__ == "__main__":
     async def main():
         await app.start()
         
-        # ടെലിഗ്രാം മെനുവിൽ സാധാരണ ഉപയോക്താക്കൾക്കായി 'Menu', 'Textbooks' മാത്രം സെറ്റ് ചെയ്യുന്നു
+        # ചാനലും ഗ്രൂപ്പും ആരംഭിയിൽ തന്നെ വോം-അപ്പ് (Warm Up/Fetch) ചെയ്ത് ക്യാഷ് ചെയ്യുന്നു
+        try:
+            await app.get_chat(GROUP_ID)
+            await app.get_chat(CHANNEL_ID)
+            print("Successfully loaded Channel & Group Data!")
+        except Exception as e:
+            print(f"Error loading initial chats: {e}")
+
+        # ടെലിഗ്രാം മെനുവിൽ 'Menu', 'Textbooks' മാത്രം നൽകുന്നു
         await app.set_bot_commands([
             BotCommand("start", "🏠 Menu & Main Options"),
             BotCommand("textbooks", "📚 Textbooks (ക്ലാസ്സ് 1 - 10)")
         ])
         
-        print("Bot Started with User Menu Buttons Configured!")
+        print("Bot Started Successfully!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
