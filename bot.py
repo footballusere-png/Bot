@@ -5,7 +5,7 @@ import requests
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ChatJoinRequest, BotCommand
 from hydrogram.enums import ChatAction
 from hydrogram.errors import UserNotParticipant
 
@@ -45,7 +45,7 @@ API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 
-ADMIN_ID = 7312906293  # നിങ്ങളുടെ Telegram User ID
+ADMIN_ID = 7312906293  # Telegram User ID
 
 GROUP_ID = -1002702148703
 CHANNEL_ID = -1003938671650
@@ -70,7 +70,27 @@ async def check_force_sub(client, user_id):
         logging.error(f"Force Sub Error: {e}")
         return True
 
-# ---------------- ADMIN COMMAND: ADD TEXTBOOK TO REALTIME DATABASE ----------------
+# ---------------- AUTO APPROVE JOIN REQUEST (NO DM MESSAGE) ----------------
+@app.on_chat_join_request()
+async def handle_join_request(client, request: ChatJoinRequest):
+    user_id = request.from_user.id
+    chat_id = request.chat.id
+
+    try:
+        # Join Request ഓട്ടോമാറ്റിക്കായി Approve ചെയ്യുന്നു
+        await client.approve_chat_join_request(chat_id, user_id)
+        
+        # യൂസറെ മെസ്സേജ് അയക്കാതെ ഫയർബേസിൽ മാത്രം സേവ് ചെയ്യുന്നു
+        user_data = {
+            "user_id": user_id, 
+            "name": request.from_user.first_name,
+            "join_requested": True
+        }
+        requests.put(f"{RTDB_URL}/users/{user_id}.json", json=user_data)
+    except Exception as e:
+        logging.error(f"Join Request Error: {e}")
+
+# ---------------- ADMIN COMMAND: ADD TEXTBOOK ----------------
 @app.on_message(filters.command("add") & filters.private)
 async def add_textbook_cmd(client, message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -98,7 +118,6 @@ async def add_textbook_cmd(client, message: Message):
     file_id = doc.file_id
     file_name = doc.file_name or f"Class_{class_num}_{subject}_{part}.pdf"
 
-    # Realtime Database Data Payload
     data = {
         "class": class_num,
         "subject": subject,
@@ -107,10 +126,9 @@ async def add_textbook_cmd(client, message: Message):
         "file_name": file_name
     }
 
-    # Clean key name for Realtime DB
     node_key = f"std_{class_num}_{subject}_{part}".replace(" ", "_").replace("-", "_")
 
-    # Save to Realtime Database
+    # Realtime Database-ലേക്ക് ഡാറ്റ സേവ് ചെയ്യുന്നു
     rtdb_endpoint = f"{RTDB_URL}/textbooks/{node_key}.json"
     res = requests.put(rtdb_endpoint, json=data)
 
@@ -187,7 +205,6 @@ async def callback_handler(client, query: CallbackQuery):
     elif data.startswith("std_"):
         class_num = data.replace("std_", "")
         
-        # Read all textbooks from RTDB
         res = requests.get(f"{RTDB_URL}/textbooks.json")
         buttons = []
 
@@ -228,6 +245,19 @@ async def callback_handler(client, query: CallbackQuery):
         else:
             await query.answer("❌ File not found in Realtime Database!", show_alert=True)
 
+    elif data == "btn_news":
+        news_text = (
+            "📰 **സ്കൂൾ വാർത്തകളും വിവരങ്ങളും (Live Updates):**\n\n"
+            "• **അധ്യയന ദിനങ്ങൾ & പരീക്ഷണ ടൈംടേബിൾ**\n"
+            "• **സ്കോളർഷിപ്പ് വിവരങ്ങൾ**\n"
+            "• **വിദ്യാഭ്യാസ അറിയിപ്പുകൾ**\n\n"
+            "എല്ലാ വിവരങ്ങളും ലൈവ് ആയി കാണാൻ ചാനലിലേക്ക് സ്വാഗതം!"
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
+        ])
+        await query.message.edit_text(news_text, reply_markup=buttons)
+
     elif data == "main_menu":
         main_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("📚 Textbooks (ക്ലാസ്സ് 1 - 10)", callback_data="btn_textbooks")],
@@ -261,11 +291,19 @@ async def broadcast_cmd(client, message: Message):
 
     await message.reply_text(f"✅ **Broadcast Completed! Sent to {success} users.**")
 
-# ---------------- BOT START ----------------
+# ---------------- BOT START & MENU BUTTON SETTINGS ----------------
 if __name__ == "__main__":
     async def main():
         await app.start()
-        print("Realtime Database Connected & Bot Started!")
+        
+        # Telegram App-ൽ താഴെ Menu Button സെറ്റ് ചെയ്യുന്നു
+        await app.set_bot_commands([
+            BotCommand("start", "🚀 സ്റ്റാർട്ട് ചെയ്യുക / Main Menu"),
+            BotCommand("add", "➕ പാഠപുസ്തകം ആഡ് ചെയ്യുക (Admin)"),
+            BotCommand("broadcast", "📢 എല്ലാവർക്കും മെസ്സേജ് അയക്കുക (Admin)")
+        ])
+        
+        print("Bot Started with Menu Button Configured!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
