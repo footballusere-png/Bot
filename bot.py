@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import requests
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from hydrogram import Client, filters
@@ -23,7 +22,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Music Downloader Bot Active")
+        self.wfile.write(b"Kerala Syllabus Textbooks Bot Active")
 
     def do_HEAD(self):
         self.send_response(200)
@@ -41,19 +40,50 @@ Thread(target=run_web_server, daemon=True).start()
 API_ID = 28300966
 API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
 BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
-CHANNEL_ID = -1004320858359  # നിങ്ങളുടെ ചാനൽ ID
 
-app = Client("MusicDownloaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# നിങ്ങളുടെ അഡ്മിൻ ടെലിഗ്രാം ID (ബ്രോഡ്കാസ്റ്റിനായി മാത്രം)
+ADMIN_ID = 1234567890  # ⚠️ ഇവിടെ നിങ്ങളുടെ യഥാർത്ഥ Telegram User ID നൽകുക
 
-# Temporary Memory Store for Songs
-SONG_CACHE = {}
+# ചാനൽ & ഗ്രൂപ്പ് ID-കൾ
+GROUP_ID = -1002702148703
+CHANNEL_ID = -1003938671650
 
-# Check Force Subscribe Status
+app = Client("KeralaSyllabusBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+# യൂസേഴ്സ് ലിസ്റ്റ് സൂക്ഷിക്കാൻ Set
+USERS_DB = set()
+
+# ------------------------------------------------
+# PDF FILE IDs Database
+# ⚠️ താഴെ കാണുന്ന File ID-കൾ നിങ്ങളുടെ ചാനലിലെ PDF ഫയലുകളുടെ File ID നൽകുക.
+# ------------------------------------------------
+TEXTBOOKS = {
+    # Class 10
+    "std10_mal": "https://t.me/c/2702148703/101", # അല്ലെങ്കിൽ Telegram File ID
+    "std10_eng": "https://t.me/c/2702148703/102",
+    
+    # Class 9
+    "std9_mal": "https://t.me/c/2702148703/91",
+    "std9_eng": "https://t.me/c/2702148703/92",
+
+    # Class 8
+    "std8_mal": "https://t.me/c/2702148703/81",
+    "std8_eng": "https://t.me/c/2702148703/82",
+}
+
+# ---------------- FORCE SUBSCRIBE CHECK ----------------
 async def check_force_sub(client, user_id):
     try:
-        member = await client.get_chat_member(CHANNEL_ID, user_id)
-        if member.status in ["kicked", "left"]:
+        # Check Group
+        member1 = await client.get_chat_member(GROUP_ID, user_id)
+        if member1.status in ["kicked", "left"]:
             return False
+        
+        # Check Channel
+        member2 = await client.get_chat_member(CHANNEL_ID, user_id)
+        if member2.status in ["kicked", "left"]:
+            return False
+
         return True
     except UserNotParticipant:
         return False
@@ -61,178 +91,166 @@ async def check_force_sub(client, user_id):
         logging.error(f"Force Sub Error: {e}")
         return True
 
-# Start Command
+# ---------------- START COMMAND ----------------
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message: Message):
-    welcome = (
-        f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🎵 **Professional Music Downloader Bot**\n\n"
-        "Send me any **Song Name**, and I'll find the exact track for you in high quality!"
-    )
-    await message.reply_text(welcome)
-
-# Fast Direct JioSaavn Search (Bypasses Render Block)
-def search_jiosaavn_direct(query):
-    url = f"https://jiosaavn-api-privateindexer.vercel.app/search/songs?query={query}"
-    try:
-        res = requests.get(url, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("status") == "SUCCESS" and data.get("data"):
-                return data["data"]["results"][:5]
-    except Exception as e:
-        logging.error(f"Search Error: {e}")
-    return []
-
-# Download File Function
-def download_file(url, destination):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-    }
-    res = requests.get(url, headers=headers, stream=True)
-    with open(destination, 'wb') as f:
-        for chunk in res.iter_content(chunk_size=1024*1024):
-            if chunk:
-                f.write(chunk)
-
-# Search Handler
-@app.on_message(filters.text & filters.private & ~filters.command("start"))
-async def handle_search(client, message: Message):
     user_id = message.from_user.id
+    USERS_DB.add(user_id)
 
-    # Force Subscribe Check
-    is_joined = await check_force_sub(client, user_id)
-    if not is_joined:
-        try:
-            chat = await client.get_chat(CHANNEL_ID)
-            invite_link = chat.invite_link or f"https://t.me/c/{str(CHANNEL_ID)[4:]}"
-        except Exception:
-            invite_link = "https://t.me"
-
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Join Our Channel", url=invite_link)],
-            [InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")]
-        ])
-        await message.reply_text(
-            "⚠️ **You must join our channel to use this bot!**\n\nPlease join the channel below and click **Try Again**.",
-            reply_markup=btn
-        )
-        return
-
-    query = message.text.strip()
-    
-    # Action Status: typing
-    await client.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-    status_msg = await message.reply_text("🔍 **serching song...**")
-
-    loop = asyncio.get_running_loop()
-    results = await loop.run_in_executor(None, search_jiosaavn_direct, query)
-
-    if not results:
-        await status_msg.edit_text("❌ **No exact songs found. Please check the spelling.**")
-        return
-
-    buttons = []
-    for idx, song in enumerate(results):
-        song_id = song.get("id") or str(idx)
-        SONG_CACHE[song_id] = song  
-
-        title = song.get("name", "Unknown Title")
-        album = song.get("album", {}).get("name", "") if isinstance(song.get("album"), dict) else ""
-        
-        # Song Title First in Inline Button
-        btn_text = f"🎵 {title} ({album})" if album else f"🎵 {title}"
-        buttons.append([InlineKeyboardButton(btn_text[:45], callback_data=f"dl_{song_id}")])
-
-    keyboard = InlineKeyboardMarkup(buttons)
-    await status_msg.edit_text(
-        f"🎯 **Select your song below:**",
-        reply_markup=keyboard
+    welcome_text = (
+        f"👋 **നമസ്കാരം {message.from_user.first_name}!**\n\n"
+        "📚 **കേരള സിലബസ് പാഠപുസ്തകങ്ങളിലേക്ക് സ്വാഗതം!**\n\n"
+        "താഴെ നൽകിയിരിക്കുന്ന ബട്ടണുകളിൽ ക്ലിക്ക് ചെയ്ത് നിങ്ങൾക്ക് ആവശ്യമുള്ള ക്ലാസ്സും മാധ്യമവും തിരഞ്ഞെടുക്കാം."
     )
 
-# Callback Query Handler (Button Click)
+    main_buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📚 Textbooks (പാഠപുസ്തകങ്ങൾ)", callback_data="btn_textbooks")],
+        [InlineKeyboardButton("📰 School News & Updates (സ്കൂൾ വാർത്തകൾ)", callback_data="btn_news")]
+    ])
+
+    await message.reply_text(welcome_text, reply_markup=main_buttons)
+
+# ---------------- FORCE SUB UI BUILDER ----------------
+async def show_force_sub_msg(client, message, is_callback=False):
+    try:
+        chat_group = await client.get_chat(GROUP_ID)
+        group_link = chat_group.invite_link or f"https://t.me/c/{str(GROUP_ID)[4:]}"
+    except Exception:
+        group_link = "https://t.me"
+
+    try:
+        chat_channel = await client.get_chat(CHANNEL_ID)
+        channel_link = chat_channel.invite_link or f"https://t.me/c/{str(CHANNEL_ID)[4:]}"
+    except Exception:
+        channel_link = "https://t.me"
+
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Join Discussion Group", url=group_link)],
+        [InlineKeyboardButton("📢 Join Main Channel", url=channel_link)],
+        [InlineKeyboardButton("🔄 Verify & Continue (സ്ഥിരീകരിക്കുക)", callback_data="check_sub")]
+    ])
+
+    sub_text = (
+        "⚠️ **ഫയൽ ലഭിക്കുന്നതിനായി താഴെ കാണുന്ന ഗ്രൂപ്പിലും ചാനലിലും ജോയിൻ ചെയ്യേണ്ടതുണ്ട്!**\n\n"
+        "1. **Discussion Group**\n"
+        "2. **Main Channel**\n\n"
+        "രണ്ടിലും ജോയിൻ ചെയ്ത ശേഷം **'Verify & Continue'** ബട്ടൺ അമർത്തുക."
+    )
+
+    if is_callback:
+        await message.edit_text(sub_text, reply_markup=buttons)
+    else:
+        await message.reply_text(sub_text, reply_markup=buttons)
+
+# ---------------- CALLBACK HANDLER ----------------
 @app.on_callback_query()
 async def callback_handler(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USERS_DB.add(user_id)
     data = query.data
 
+    # Verify Subscription Button
     if data == "check_sub":
-        is_joined = await check_force_sub(client, query.from_user.id)
+        is_joined = await check_force_sub(client, user_id)
         if is_joined:
-            await query.message.edit_text("✅ **Thank you for joining! Now send me a song name.**")
+            await query.answer("✅ Verified Successfully!", show_alert=True)
+            # Main Menu Show
+            main_buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📚 Textbooks (പാഠപുസ്തകങ്ങൾ)", callback_data="btn_textbooks")],
+                [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
+            ])
+            await query.message.edit_text("✅ **പരിശോധന പൂർത്തിയായി! നിങ്ങൾക്ക് ആവശ്യമുള്ള വിവരങ്ങൾ തിരഞ്ഞെടുക്കാം:**", reply_markup=main_buttons)
         else:
-            await query.answer("❌ You haven't joined the channel yet!", show_alert=True)
+            await query.answer("❌ നിങ്ങൾ ചാനലിലും ഗ്രൂപ്പിലും ജോയിൻ ചെയ്തിട്ടില്ല!", show_alert=True)
         return
 
-    if data.startswith("dl_"):
-        song_id = data.replace("dl_", "")
-        song_data = SONG_CACHE.get(song_id)
+    # Check Force Sub before proceeding to downloads
+    is_joined = await check_force_sub(client, user_id)
+    if not is_joined:
+        await show_force_sub_msg(client, query.message, is_callback=True)
+        return
 
-        if not song_data:
-            await query.answer("❌ Search expired. Please search for the song again.", show_alert=True)
-            return
+    # Main Textbooks Menu
+    if data == "btn_textbooks":
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Class 10", callback_data="std_10"), InlineKeyboardButton("Class 9", callback_data="std_9")],
+            [InlineKeyboardButton("Class 8", callback_data="std_8"), InlineKeyboardButton("Class 7", callback_data="std_7")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
+        ])
+        await query.message.edit_text("📖 **നിങ്ങളുടെ ക്ലാസ്സ് തിരഞ്ഞെടുക്കുക:**", reply_markup=buttons)
 
-        await query.answer()
-        
-        # Action Status: downloading
-        await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.RECORD_AUDIO)
-        await query.message.edit_text("📥 **downloading mp3 file...**")
+    # Class Medium Selection (Class 10)
+    elif data == "std_10":
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🟢 Malayalam Medium", callback_data="dl_std10_mal")],
+            [InlineKeyboardButton("🔵 English Medium", callback_data="dl_std10_eng")],
+            [InlineKeyboardButton("🔙 Back", callback_data="btn_textbooks")]
+        ])
+        await query.message.edit_text("🌐 **Class 10 - മാധ്യമം (Medium) തിരഞ്ഞെടുക്കുക:**", reply_markup=buttons)
 
+    # Download Handler
+    elif data.startswith("dl_"):
+        book_key = data.replace("dl_", "")
+        pdf_url = TEXTBOOKS.get(book_key)
+
+        if pdf_url:
+            await query.message.edit_text(f"📥 **നിങ്ങളുടെ പാഠപുസ്തക ഫയൽ താഴെ നൽകിയിരിക്കുന്നു:**\n\n🔗 {pdf_url}")
+        else:
+            await query.message.edit_text("⚠️ **ഈ ക്ലാസ്സിലെ PDF ഫയൽ ഉടൻ അപ്‌ലോഡ് ചെയ്യുന്നതാണ്.**")
+
+    # School News Section
+    elif data == "btn_news":
+        news_text = (
+            "📢 **ലൈവ് സ്കൂൾ വിവരങ്ങളും വാർത്തകളും:**\n\n"
+            "• **സ്കൂൾ തുറക്കുന്ന തീയതികൾ**\n"
+            "• **പരീക്ഷാ ടൈംടേബിളുകൾ**\n"
+            "• **സ്കോളർഷിപ്പ് വിവരങ്ങൾ**\n\n"
+            "എല്ലാ വിവരങ്ങളും പ്രധാന ചാനലിൽ ദിവസവും ലൈവ് ആയി അപ്ഡേറ്റ് ചെയ്യുന്നതാണ്."
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
+        ])
+        await query.message.edit_text(news_text, reply_markup=buttons)
+
+    # Back to Main Menu
+    elif data == "main_menu":
+        main_buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📚 Textbooks (പാഠപുസ്തകങ്ങൾ)", callback_data="btn_textbooks")],
+            [InlineKeyboardButton("📰 School News & Updates", callback_data="btn_news")]
+        ])
+        await query.message.edit_text("🎯 **Main Menu:**", reply_markup=main_buttons)
+
+# ---------------- BROADCAST COMMAND (FOR ADMIN) ----------------
+@app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast_cmd(client, message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    if not message.reply_to_message:
+        await message.reply_text("⚠️ **എല്ലാവർക്കും അയക്കേണ്ട മെസ്സേജിന് മറുപടിയായി (Reply) `/broadcast` എന്ന് ടൈപ്പ് ചെയ്യുക.**")
+        return
+
+    broadcast_msg = message.reply_to_message
+    total = len(USERS_DB)
+    success = 0
+
+    status_msg = await message.reply_text(f"🚀 Broadcasting to {total} users...")
+
+    for user_id in USERS_DB:
         try:
-            title = song_data.get("name", "Audio Track")
-            
-            # Extract Artist
-            artists = "Unknown Artist"
-            if song_data.get("primaryArtists"):
-                artists = song_data["primaryArtists"]
+            await broadcast_msg.copy(chat_id=user_id)
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            pass
 
-            # Extract Direct MP3 URL
-            download_urls = song_data.get("downloadUrl", [])
-            audio_url = download_urls[-1].get("link") or download_urls[-1].get("url") if download_urls else None
+    await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\nTotal Sent: {success}/{total}")
 
-            if not audio_url:
-                await query.message.edit_text("❌ **Download link not available for this song.**")
-                return
-
-            file_path = f"downloads/{song_id}.mp3"
-
-            loop = asyncio.get_running_loop()
-            
-            # Fast Direct Download
-            await loop.run_in_executor(None, download_file, audio_url, file_path)
-
-            # Action Status: sending
-            await client.send_chat_action(chat_id=query.message.chat.id, action=ChatAction.UPLOAD_AUDIO)
-            await query.message.edit_text("📤 **file senting mp3 file...**")
-
-            duration = int(song_data.get("duration", 0))
-
-            # Send MP3
-            await query.message.reply_audio(
-                audio=file_path,
-                caption=f"🎵 **{title}**\n🎤 **Artist:** {artists}\n\nDownloaded via Music Bot",
-                title=title,
-                performer=artists,
-                duration=duration
-            )
-
-            # Cleanup
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-            await query.message.delete()
-
-        except Exception as e:
-            logging.error(f"Download Error: {e}")
-            await query.message.edit_text("❌ **Failed to download the audio track.**")
-
-# ---------- BOT START ----------
+# ---------------- BOT START ----------------
 if __name__ == "__main__":
-    if not os.path.exists("downloads"):
-        os.makedirs("downloads")
-
     async def main():
         await app.start()
-        print("Music Downloader Bot is Running!")
+        print("Kerala Syllabus Bot is Live and Running!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
