@@ -47,6 +47,7 @@ BOT_TOKEN = "8174552245:AAGzK5x7A55r-JVk-DVdteCz8nLBpu0jndU"
 
 ADMIN_ID = 7312906293  # Telegram User ID
 
+# ഇവിടെ ഐഡിക്ക് പകരമായി നിങ്ങളുടെ ഗ്രൂപ്പിന്റെയും ചാനലിന്റെയും യൂസർനെയിം നൽകുക (ഉദാഹരണത്തിന്: "@my_channel")
 GROUP_ID = -1002702148703
 CHANNEL_ID = -1003938671650
 
@@ -296,14 +297,13 @@ if __name__ == "__main__":
     async def main():
         await app.start()
         
-        # Telegram App-ൽ താഴെ Menu Button സെറ്റ് ചെയ്യുന്നു
+        # ടെലിഗ്രാം മെനുവിൽ സാധാരണ ഉപയോക്താക്കൾക്കായി 'Menu', 'Textbooks' മാത്രം സെറ്റ് ചെയ്യുന്നു
         await app.set_bot_commands([
-            BotCommand("start", "🚀 സ്റ്റാർട്ട് ചെയ്യുക / Main Menu"),
-            BotCommand("add", "➕ പാഠപുസ്തകം ആഡ് ചെയ്യുക (Admin)"),
-            BotCommand("broadcast", "📢 എല്ലാവർക്കും മെസ്സേജ് അയക്കുക (Admin)")
+            BotCommand("start", "🏠 Menu & Main Options"),
+            BotCommand("textbooks", "📚 Textbooks (ക്ലാസ്സ് 1 - 10)")
         ])
         
-        print("Bot Started with Menu Button Configured!")
+        print("Bot Started with User Menu Buttons Configured!")
         await asyncio.Event().wait()
 
     loop = asyncio.get_event_loop()
