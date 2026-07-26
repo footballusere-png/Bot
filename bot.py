@@ -2,6 +2,7 @@ import asyncio
 import re
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram.errors import FloodWait
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -49,12 +50,12 @@ async def main():
         try:
             # Step 1: ടാർഗെറ്റ് ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(4)
+            await asyncio.sleep(6)  # ഡിലെ 6 സെക്കൻഡ് ആക്കി
 
             target_message = None
             target_button = None
 
-            # Step 2: വരുന്ന റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ ബട്ടൺ കണ്ടെത്തുന്നു
+            # Step 2: റിസൾട്ട് കണ്ടുപിടിക്കുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.reply_markup:
                     target_message = reply
@@ -69,15 +70,12 @@ async def main():
                     break
 
             if target_message and target_button:
-                # ബട്ടൺ ലിങ്ക് (URL) വഴി ഉള്ളതാണെങ്കിൽ
                 if target_button.url:
                     await status_msg.edit_text(
                         f"🎬 **ബട്ടൺ ലിങ്ക് കണ്ടെത്തി!**\n"
                         f"📁 `{target_button.text}`\n\n"
                         f"🔗 [ഇവിടെ ക്ലിക്ക് ചെയ്തു ഫയൽ തുറക്കുക]({target_button.url})"
                     )
-                
-                # Callback വഴി പ്രവർത്തിക്കുന്ന ബട്ടൺ ആണെങ്കിൽ
                 elif target_button.callback_data:
                     await status_msg.edit_text(
                         f"🎬 **ഫയൽ കണ്ടെത്തി! പ്രോസസ്സ് ചെയ്യുന്നു...**\n"
@@ -85,13 +83,22 @@ async def main():
                         f"⏳ *വീഡിയോ ലഭിക്കാൻ കാത്തിരിക്കൂ...*"
                     )
 
-                    await userbot.request_callback_answer(
-                        chat_id=TARGET_BOT,
-                        message_id=target_message.id,
-                        callback_data=target_button.callback_data
-                    )
+                    # Callback Click
+                    try:
+                        await userbot.request_callback_answer(
+                            chat_id=TARGET_BOT,
+                            message_id=target_message.id,
+                            callback_data=target_button.callback_data
+                        )
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                        await userbot.request_callback_answer(
+                            chat_id=TARGET_BOT,
+                            message_id=target_message.id,
+                            callback_data=target_button.callback_data
+                        )
                     
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(7)
 
                     file_sent = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
@@ -110,10 +117,11 @@ async def main():
                     f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
                 )
 
+        except FloodWait as e:
+            await status_msg.edit_text(f"⏳ **ടെലഗ്രാം പരിധി കടന്നു.** `{e.value}` സെക്കൻഡിന് ശേഷം വീണ്ടും ശ്രമിക്കുക.")
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
-    # Start Both Clients
     await userbot.start()
     await main_bot.start()
     print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
