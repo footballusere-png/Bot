@@ -43,7 +43,7 @@ async def main():
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ആദ്യത്തെ ഫയൽ ബട്ടൺ ക്ലിക്ക് ചെയ്യുന്നു, കാത്തിരിക്കൂ...*"
+            f"⏳ *ഫയൽ കണ്ടെത്തുന്നു, ദയവായി കാത്തിരിക്കൂ...*"
         )
 
         try:
@@ -68,38 +68,46 @@ async def main():
                 if target_button:
                     break
 
-            if target_message and target_button and target_button.callback_data:
-                await status_msg.edit_text(
-                    f"🎬 **ബട്ടൺ കണ്ടെത്തി ക്ലിക്ക് ചെയ്യുന്നു!**\n"
-                    f"📁 `{target_button.text}`\n\n"
-                    f"⏳ *ഫയൽ ഡൗൺലോഡ് ചെയ്ത് അയക്കുന്നു...*"
-                )
-
-                # Step 3: യൂസർബോട്ട് വഴി നേരിട്ട് ഇൻലൈൻ ബട്ടൺ ക്ലിക്ക് ചെയ്യുന്നു (Callback Query വിളിക്കുന്നു)
-                await userbot.request_callback_data(
-                    chat_id=TARGET_BOT,
-                    message_id=target_message.id,
-                    data=target_button.callback_data
-                )
+            if target_message and target_button:
+                # ബട്ടൺ ലിങ്ക് (URL) വഴി ഉള്ളതാണെങ്കിൽ
+                if target_button.url:
+                    await status_msg.edit_text(
+                        f"🎬 **ബട്ടൺ ലിങ്ക് കണ്ടെത്തി!**\n"
+                        f"📁 `{target_button.text}`\n\n"
+                        f"🔗 [ഇവിടെ ക്ലിക്ക് ചെയ്തു ഫയൽ തുറക്കുക]({target_button.url})"
+                    )
                 
-                await asyncio.sleep(5)
+                # Callback വഴി പ്രവർത്തിക്കുന്ന ബട്ടൺ ആണെങ്കിൽ
+                elif target_button.callback_data:
+                    await status_msg.edit_text(
+                        f"🎬 **ഫയൽ കണ്ടെത്തി! പ്രോസസ്സ് ചെയ്യുന്നു...**\n"
+                        f"📁 `{target_button.text}`\n\n"
+                        f"⏳ *വീഡിയോ ലഭിക്കാൻ കാത്തിരിക്കൂ...*"
+                    )
 
-                file_sent = False
-                async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
-                    if file_msg.id > target_message.id and (file_msg.document or file_msg.video or file_msg.audio):
-                        # ചാനലിലേക്കും യൂസറുടെ ചാറ്റിലേക്കും അയക്കുന്നു
-                        await file_msg.forward(MY_CHANNEL)
-                        await file_msg.copy(chat_id=message.chat.id)
-                        file_sent = True
-                        break
+                    await userbot.request_callback_answer(
+                        chat_id=TARGET_BOT,
+                        message_id=target_message.id,
+                        callback_data=target_button.callback_data
+                    )
+                    
+                    await asyncio.sleep(5)
 
-                if file_sent:
-                    await status_msg.delete()
-                else:
-                    await status_msg.edit_text("⚠️ ബട്ടൺ ക്ലിക്ക് ചെയ്തെങ്കിലും ഫയൽ ലഭ്യമായില്ല.")
+                    file_sent = False
+                    async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
+                        if file_msg.id > target_message.id and (file_msg.document or file_msg.video or file_msg.audio):
+                            await file_msg.forward(MY_CHANNEL)
+                            await file_msg.copy(chat_id=message.chat.id)
+                            file_sent = True
+                            break
+
+                    if file_sent:
+                        await status_msg.delete()
+                    else:
+                        await status_msg.edit_text("⚠️ ഫയൽ ലഭിക്കാൻ വൈകുന്നു. ദയവായി വീണ്ടും ശ്രമിക്കുക.")
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ബട്ടണിൽ ലഭ്യമല്ല."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
                 )
 
         except Exception as e:
