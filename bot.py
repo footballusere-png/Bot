@@ -18,6 +18,7 @@ async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+    # 1. Start Command (/start)
     @main_bot.on_message(filters.command("start") & filters.private)
     async def start_cmd(client: Client, message: Message):
         welcome_text = (
@@ -31,6 +32,7 @@ async def main():
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
+    # 2. Movie Search Request
     @main_bot.on_message(filters.text & filters.private)
     async def handle_user_search(client: Client, message: Message):
         movie_name = message.text.strip()
@@ -44,24 +46,19 @@ async def main():
         )
 
         try:
-            # 1. Target ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(5)  # ബോട്ട് റിപ്ലൈ നൽകാൻ സമയം നൽകുന്നു
+            await asyncio.sleep(5)
 
             file_buttons = []
             count = 0
 
-            # 2. Target ബോട്ടിൽ നിന്ന് വരുന്ന അവസാന മെസ്സേജുകൾ പരിശോധിക്കുന്നു
             async for reply in userbot.search_messages(TARGET_BOT, limit=5):
-                # നമ്മൾ അയച്ച മെസ്സേജിന് ശേഷമുള്ളവ മാത്രം എടുക്കുന്നു
                 if reply.id > sent_msg.id:
-                    # ഫയലോ മെസ്സേജോ ആണെങ്കിൽ ചാനലിലേക്ക് ഫോർവേഡ് ചെയ്യുന്നു
                     fwd = await reply.forward(MY_CHANNEL)
                     
                     clean_channel_id = str(MY_CHANNEL).replace("-100", "")
                     file_link = f"https://t.me/c/{clean_channel_id}/{fwd.id}"
                     
-                    # മെസ്സേജിൽ ഉള്ള ക്യാപ്ഷൻ അല്ലെങ്കിൽ ഒരു പേര് ബട്ടണിനായി എടുക്കുന്നു
                     btn_text = reply.text[:30] if reply.text else f"📥 Movie File {count+1}"
                     file_buttons.append([InlineKeyboardButton(btn_text, url=file_link)])
                     count += 1
@@ -82,10 +79,13 @@ async def main():
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
+    # Start Both Clients
     await userbot.start()
     await main_bot.start()
     print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
-    asyncio.Event().wait()
+
+    # Keep Python running without crashing
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
