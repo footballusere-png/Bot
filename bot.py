@@ -11,9 +11,7 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-# ഫയലുകൾ ഉള്ള ചാനലിന്റെ Username അല്ലെങ്കിൽ ID (ഉദാഹരണത്തിന്: "@my_file_channel" അല്ലെങ്കിൽ ID)
-SOURCE_CHANNEL = "@DPCBackup_Files_01_Bot" 
-MY_CHANNEL = -1004296254082
+MY_CHANNEL = -1004296254082 # ഫയലുകൾ ഉള്ള നിങ്ങളുടെ ചാനൽ ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
@@ -84,17 +82,14 @@ async def main():
     # 2. Multiple Movie Add Command (/add)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
-        # മെസ്സേജിലെ പുതിയ വരികൾ (Lines) വേർതിരിക്കുന്നു
         lines = message.text.split("\n")
         
         movies_to_add = []
         if len(lines) == 1:
-            # ഒരൊറ്റ ലൈനിൽ /add Movie Name എന്ന് അടിച്ചാൽ
             parts = lines[0].split(None, 1)
             if len(parts) > 1:
                 movies_to_add.append(parts[1].strip())
         else:
-            # പല വരികളിലായി സിനിമകളുടെ പേര് നൽകിയാൽ
             for line in lines:
                 cleaned_line = line.replace("/add", "").strip()
                 if cleaned_line:
@@ -105,8 +100,7 @@ async def main():
                 "⚠️ **ഉപയോഗിക്കേണ്ട രീതി:**\n\n"
                 "`/add`\n"
                 "`Movie 1`\n"
-                "`Movie 2`\n"
-                "`Movie 3`"
+                "`Movie 2`"
             )
             return
 
@@ -129,7 +123,7 @@ async def main():
 
         await message.reply_text(
             f"✅ **ഫലങ്ങൾ:**\n\n"
-            f"➕ പുതിയതായി ആഡ് ചെയ്തവ: `{added_count}`\n"
+            f"➕ ഇൻഡെക്സിംഗ് ലിസ്റ്റിലേക്ക് ആഡ് ചെയ്തവ: `{added_count}`\n"
             f"⚠️ ലിസ്റ്റിൽ മുൻപേ ഉള്ളവ: `{already_exists}`"
         )
 
@@ -147,7 +141,7 @@ async def main():
             await message.reply_text("❌ ലിസ്റ്റിൽ സിനിമകളൊന്നും ആഡ് ചെയ്തിട്ടില്ല.")
             return
 
-        text = f"🎬 **ആകെ സിനിമകൾ: {len(movies)}**\n\n"
+        text = f"🎬 **ആകെ ഇൻഡെക്സ് ചെയ്യാനുള്ള സിനിമകൾ: {len(movies)}**\n\n"
         text += "\n".join([f"{i+1}. {m}" for i, m in enumerate(movies[:50])])
         
         if len(movies) > 50:
@@ -155,7 +149,7 @@ async def main():
 
         await message.reply_text(text)
 
-    # 4. Single Search Handler (ചാനലിൽ നിന്ന് സെർച്ച് ചെയ്യുന്നത്)
+    # 4. Single Search Handler (സ്വന്തം ചാനലിൽ നിന്ന് യൂസർക്ക് സിനിമ അയച്ചു നൽകുന്നു)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/"))
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
@@ -184,14 +178,13 @@ async def main():
 
         try:
             file_found = False
-            # SOURCE_CHANNEL ചാനലിലെ പോസ്റ്റുകൾ സെർച്ച് ചെയ്യുന്നു
-            async for ch_message in userbot.search_messages(SOURCE_CHANNEL, query=movie_name):
+            # സ്വന്തം ചാനലിൽ (`MY_CHANNEL`) സിനിമയുടെ ഫയൽ ഉണ്ടോ എന്ന് തിരയുന്നു
+            async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
                 if ch_message.document or ch_message.video or ch_message.audio:
-                    copied_msg = await ch_message.copy(chat_id=MY_CHANNEL)
                     await main_bot.copy_message(
                         chat_id=message.chat.id,
                         from_chat_id=MY_CHANNEL,
-                        message_id=copied_msg.id
+                        message_id=ch_message.id
                     )
                     file_found = True
                     break
@@ -199,14 +192,14 @@ async def main():
             if file_found:
                 await status_msg.delete()
             else:
-                await status_msg.edit_text(f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** ചാനലിൽ ലഭ്യമല്ല.")
+                await status_msg.edit_text(f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** ഡാറ്റാബേസിൽ ലഭ്യമല്ല.")
 
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
     await userbot.start()
     await main_bot.start()
-    print("🚀 Movie Bot & Userbot റൺ ആയി!")
+    print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
 
     await asyncio.Event().wait()
 
