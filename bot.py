@@ -54,7 +54,7 @@ async def main():
     async def start_cmd(client: Client, message: Message):
         save_user(message.from_user.id)
         
-        # Check Force Join
+        # Force Join Check (First Layer)
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -124,7 +124,7 @@ async def main():
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
 
-        # Check Force Join
+        # Force Join Check (Before Processing Search)
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -168,31 +168,35 @@ async def main():
                     break
 
             if first_link:
+                # Telegram Start Param Link ആണെങ്കിൽ
                 if "t.me/" in first_link and "start=" in first_link:
-                    bot_username = first_link.split("t.me/")[1].split("?")[0]
-                    param = first_link.split("start=")[1]
+                    try:
+                        bot_username = first_link.split("t.me/")[1].split("?")[0]
+                        param = first_link.split("start=")[1]
 
-                    await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
+                        await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
 
-                    start_msg = await userbot.send_message(f"@{bot_username}", f"/start {param}")
-                    await asyncio.sleep(6)
+                        start_msg = await userbot.send_message(f"@{bot_username}", f"/start {param}")
+                        await asyncio.sleep(6)
 
-                    file_sent = False
-                    async for file_msg in userbot.get_chat_history(f"@{bot_username}", limit=5):
-                        if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
-                            ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
-                            await main_bot.copy_message(
-                                chat_id=message.chat.id,
-                                from_chat_id=MY_CHANNEL,
-                                message_id=ch_msg.id
-                            )
-                            file_sent = True
-                            break
+                        file_sent = False
+                        async for file_msg in userbot.get_chat_history(f"@{bot_username}", limit=5):
+                            if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
+                                ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
+                                await main_bot.copy_message(
+                                    chat_id=message.chat.id,
+                                    from_chat_id=MY_CHANNEL,
+                                    message_id=ch_msg.id
+                                )
+                                file_sent = True
+                                break
 
-                    if file_sent:
-                        await status_msg.delete()
-                    else:
-                        await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ കഴിഞ്ഞില്ല. വീണ്ടും ശ്രമിക്കുക.")
+                        if file_sent:
+                            await status_msg.delete()
+                        else:
+                            await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ കഴിഞ്ഞില്ല. വീണ്ടും ശ്രമിക്കുക.")
+                    except Exception as err:
+                        await status_msg.edit_text(f"⚠️ ലിങ്ക് പ്രോസസ്സ് ചെയ്യുന്നതിൽ തടസ്സം: `{err}`")
 
                 else:
                     button_markup = InlineKeyboardMarkup([
