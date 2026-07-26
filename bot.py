@@ -15,14 +15,6 @@ MY_CHANNEL = -1004296254082
 UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 # ----------------------------------------
 
-def remove_quality_tags(text: str) -> str:
-    # വലുപ്പമുള്ള ബ്രാക്കറ്റുകളും ക്വാളിറ്റി ടാഗുകളും പൂർണ്ണമായി ഒഴിവാക്കി ക്ലീൻ ആയ പേര് മാത്രം എടുക്കുന്നു
-    cleaned = re.sub(r'\[.*?\]', '', text).strip()
-    match = re.split(r'\b(Rip|WEB-DL|WEBRip|Bluray|HDRip|1080p|720p|480p|x264|x265|HEVC|DVI|Malayalam|Hindi|Tamil)\b', cleaned, flags=re.IGNORECASE)
-    if match:
-        cleaned = match[0].strip()
-    return cleaned if cleaned else text.strip()
-
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -51,7 +43,7 @@ async def main():
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ആദ്യത്തെ ഫയൽ എടുക്കുന്നു, കാത്തിരിക്കൂ...*"
+            f"⏳ *ആദ്യത്തെ ഫയൽ ബട്ടൺ ക്ലിക്ക് ചെയ്യുന്നു, കാത്തിരിക്കൂ...*"
         )
 
         try:
@@ -59,38 +51,42 @@ async def main():
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
             await asyncio.sleep(4)
 
-            first_button_text = None
+            target_message = None
+            target_button = None
 
-            # Step 2: വരുന്ന റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ ബട്ടൺ ടെക്സ്റ്റ് എടുക്കുന്നു
+            # Step 2: വരുന്ന റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ ബട്ടൺ കണ്ടെത്തുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.reply_markup:
+                    target_message = reply
                     for row in reply.reply_markup.inline_keyboard:
                         for btn in row:
                             if "NEXT" not in btn.text:
-                                first_button_text = btn.text
+                                target_button = btn
                                 break
-                        if first_button_text:
+                        if target_button:
                             break
-                if first_button_text:
+                if target_button:
                     break
 
-            if first_button_text:
-                # Step 3: ക്വാളിറ്റി ടാഗുകൾ ഒഴിവാക്കി ക്ലീൻ ആയ പേര് ഉണ്ടാക്കുന്നു
-                clean_query = remove_quality_tags(first_button_text)
-                
+            if target_message and target_button and target_button.callback_data:
                 await status_msg.edit_text(
-                    f"🎬 **ഫയൽ കണ്ടെത്തി!**\n"
-                    f"📁 `{clean_query}`\n\n"
-                    f"⏳ *ഡൗൺലോഡ് ചെയ്ത് അയക്കുന്നു...*"
+                    f"🎬 **ബട്ടൺ കണ്ടെത്തി ക്ലിക്ക് ചെയ്യുന്നു!**\n"
+                    f"📁 `{target_button.text}`\n\n"
+                    f"⏳ *ഫയൽ ഡൗൺലോഡ് ചെയ്ത് അയക്കുന്നു...*"
                 )
 
-                # Step 4: ആ ക്ലീൻ ചെയ്ത പേര് വീണ്ടും ബോട്ടിലേക്ക് അയച്ച് ഫയൽ വരുത്തുന്നു
-                file_req = await userbot.send_message(TARGET_BOT, clean_query)
+                # Step 3: യൂസർബോട്ട് വഴി നേരിട്ട് ഇൻലൈൻ ബട്ടൺ ക്ലിക്ക് ചെയ്യുന്നു (Callback Query വിളിക്കുന്നു)
+                await userbot.request_callback_data(
+                    chat_id=TARGET_BOT,
+                    message_id=target_message.id,
+                    data=target_button.callback_data
+                )
+                
                 await asyncio.sleep(5)
 
                 file_sent = False
                 async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
-                    if file_msg.id > file_req.id and (file_msg.document or file_msg.video or file_msg.audio):
+                    if file_msg.id > target_message.id and (file_msg.document or file_msg.video or file_msg.audio):
                         # ചാനലിലേക്കും യൂസറുടെ ചാറ്റിലേക്കും അയക്കുന്നു
                         await file_msg.forward(MY_CHANNEL)
                         await file_msg.copy(chat_id=message.chat.id)
@@ -100,10 +96,10 @@ async def main():
                 if file_sent:
                     await status_msg.delete()
                 else:
-                    await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ കഴിഞ്ഞില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക.")
+                    await status_msg.edit_text("⚠️ ബട്ടൺ ക്ലിക്ക് ചെയ്തെങ്കിലും ഫയൽ ലഭ്യമായില്ല.")
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ബട്ടണിൽ ലഭ്യമല്ല."
                 )
 
         except Exception as e:
