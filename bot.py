@@ -11,7 +11,8 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-TARGET_BOT = "@DPCBackup_Files_01_Bot"
+# ഫയലുകൾ ഉള്ള ചാനലിന്റെ Username അല്ലെങ്കിൽ ID (ഉദാഹരണത്തിന്: "@my_file_channel" അല്ലെങ്കിൽ ID)
+SOURCE_CHANNEL = "@DPCBackup_Files_01_Bot" 
 MY_CHANNEL = -1004296254082
 
 # Force Join Configuration
@@ -80,30 +81,59 @@ async def main():
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
-    # 2. Admin Command: Add Movie via Bot (/add Movie Name)
+    # 2. Multiple Movie Add Command (/add)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
-        if len(message.command) < 2:
-            await message.reply_text("⚠️ **ഉപയോഗിക്കേണ്ട രീതി:** `/add Pushpa 2`")
+        # മെസ്സേജിലെ പുതിയ വരികൾ (Lines) വേർതിരിക്കുന്നു
+        lines = message.text.split("\n")
+        
+        movies_to_add = []
+        if len(lines) == 1:
+            # ഒരൊറ്റ ലൈനിൽ /add Movie Name എന്ന് അടിച്ചാൽ
+            parts = lines[0].split(None, 1)
+            if len(parts) > 1:
+                movies_to_add.append(parts[1].strip())
+        else:
+            # പല വരികളിലായി സിനിമകളുടെ പേര് നൽകിയാൽ
+            for line in lines:
+                cleaned_line = line.replace("/add", "").strip()
+                if cleaned_line:
+                    movies_to_add.append(cleaned_line)
+
+        if not movies_to_add:
+            await message.reply_text(
+                "⚠️ **ഉപയോഗിക്കേണ്ട രീതി:**\n\n"
+                "`/add`\n"
+                "`Movie 1`\n"
+                "`Movie 2`\n"
+                "`Movie 3`"
+            )
             return
 
-        movie_name = message.text.split(None, 1)[1].strip()
-        
         if not os.path.exists(MOVIE_DB_FILE):
             open(MOVIE_DB_FILE, "w", encoding="utf-8").close()
 
+        added_count = 0
+        already_exists = 0
+
         with open(MOVIE_DB_FILE, "r+", encoding="utf-8") as f:
-            existing_movies = [line.strip().lower() for line in f.readlines()]
+            existing_movies = [l.strip().lower() for l in f.readlines()]
             
-            if movie_name.lower() in existing_movies:
-                await message.reply_text(f"⚠️ **'{movie_name}'** ഇതിനകം ലിസ്റ്റിൽ ഉണ്ട്!")
-                return
-                
-            f.write(f"{movie_name}\n")
+            for m in movies_to_add:
+                if m.lower() not in existing_movies:
+                    f.write(f"{m}\n")
+                    existing_movies.append(m.lower())
+                    added_count += 1
+                else:
+                    already_exists += 1
 
-        await message.reply_text(f"✅ **'{movie_name}'** വിജയകരമായി ലിസ്റ്റിലേക്ക് ആഡ് ചെയ്തു!")
+        await message.reply_text(
+            f"✅ **ഫലങ്ങൾ:**\n\n"
+            f"➕ പുതിയതായി ആഡ് ചെയ്തവ: `{added_count}`\n"
+            f"⚠️ ലിസ്റ്റിൽ മുൻപേ ഉള്ളവ: `{already_exists}`"
+        )
 
-    # 3. Admin Command: List Movies (/list)
+    # 3. List Movies Command (/list)
     @main_bot.on_message(filters.command("list") & filters.private & filters.user(ADMIN_ID))
     async def list_movies_cmd(client: Client, message: Message):
         if not os.path.exists(MOVIE_DB_FILE):
@@ -125,46 +155,7 @@ async def main():
 
         await message.reply_text(text)
 
-    # 4. Admin Broadcast Command (/broadcast)
-    @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_ID))
-    async def broadcast_cmd(client: Client, message: Message):
-        if not message.reply_to_message and len(message.command) < 2:
-            await message.reply_text("⚠️ **ബ്രോഡ്കാസ്റ്റ് ചെയ്യാൻ ഒരു മെസ്സേജിന് റിപ്ലൈ ചെയ്യുക അല്ലെങ്കിൽ ടെക്സ്റ്റ് അയക്കുക.**")
-            return
-
-        if not os.path.exists(USER_DB_FILE):
-            await message.reply_text("❌ യൂസേഴ്സ് ആരും ഡാറ്റാബേസിൽ ലഭ്യമല്ല.")
-            return
-
-        with open(USER_DB_FILE, "r") as f:
-            users = f.read().splitlines()
-
-        status_msg = await message.reply_text(f"⏳ **ബ്രോഡ്കാസ്റ്റ് ആരംഭിച്ചു...**\n👥 ആകെ യൂസേഴ്സ്: `{len(users)}`")
-        
-        success = 0
-        failed = 0
-
-        for user_id in users:
-            try:
-                if message.reply_to_message:
-                    await message.reply_to_message.copy(chat_id=int(user_id))
-                else:
-                    broadcast_text = message.text.split(None, 1)[1]
-                    await client.send_message(chat_id=int(user_id), text=broadcast_text)
-                success += 1
-                await asyncio.sleep(0.1)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-            except Exception:
-                failed += 1
-
-        await status_msg.edit_text(
-            f"✅ **ബ്രോഡ്കാസ്റ്റ് പൂർത്തിയായി!**\n\n"
-            f"🎯 വിജയിച്ചത്: `{success}`\n"
-            f"❌ പരാജയപ്പെട്ടത്: `{failed}`"
-        )
-
-    # 5. Movie Search Request (~filters.regex(r"^/") ഉപയോഗിച്ച് ഫിക്സ് ചെയ്തു)
+    # 4. Single Search Handler (ചാനലിൽ നിന്ന് സെർച്ച് ചെയ്യുന്നത്)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/"))
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
@@ -187,69 +178,35 @@ async def main():
             return
 
         status_msg = await message.reply_text(
-            f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
-            f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ഫയലുകൾ തിരയുന്നു, കാത്തിരിക്കൂ...*"
+            f"🔍 **ചാനലിൽ സെർച്ച് ചെയ്യുന്നു...**\n"
+            f"🎬 **സിനിമ:** `{movie_name}`"
         )
 
         try:
-            sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(4)
-
-            first_link = None
-
-            async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
-                if reply.id > sent_msg.id and reply.text:
-                    if reply.entities:
-                        for entity in reply.entities:
-                            if entity.type.name == "TEXT_LINK" and entity.url:
-                                first_link = entity.url
-                                break
-                if first_link:
+            file_found = False
+            # SOURCE_CHANNEL ചാനലിലെ പോസ്റ്റുകൾ സെർച്ച് ചെയ്യുന്നു
+            async for ch_message in userbot.search_messages(SOURCE_CHANNEL, query=movie_name):
+                if ch_message.document or ch_message.video or ch_message.audio:
+                    copied_msg = await ch_message.copy(chat_id=MY_CHANNEL)
+                    await main_bot.copy_message(
+                        chat_id=message.chat.id,
+                        from_chat_id=MY_CHANNEL,
+                        message_id=copied_msg.id
+                    )
+                    file_found = True
                     break
 
-            if first_link and "t.me/" in first_link:
-                await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
-
-                if "start=" in first_link:
-                    param = first_link.split("start=")[1]
-                    if "?" in param:
-                        param = param.split("?")[0]
-                    
-                    start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
-                else:
-                    start_msg = sent_msg
-
-                await asyncio.sleep(5)
-
-                file_sent = False
-                async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=6):
-                    if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
-                        ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
-                        
-                        await main_bot.copy_message(
-                            chat_id=message.chat.id,
-                            from_chat_id=MY_CHANNEL,
-                            message_id=ch_msg.id
-                        )
-                        file_sent = True
-                        break
-
-                if file_sent:
-                    await status_msg.delete()
-                else:
-                    await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമായില്ല. ഫയൽ ലിങ്ക് വാലിഡ് ആണോ എന്ന് പരിശോധിക്കുക.")
+            if file_found:
+                await status_msg.delete()
             else:
-                await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'**യുടെ ഫയലുകൾ ലഭ്യമല്ല."
-                )
+                await status_msg.edit_text(f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** ചാനലിൽ ലഭ്യമല്ല.")
 
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
     await userbot.start()
     await main_bot.start()
-    print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
+    print("🚀 Movie Bot & Userbot റൺ ആയി!")
 
     await asyncio.Event().wait()
 
