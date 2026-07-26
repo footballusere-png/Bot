@@ -1,8 +1,6 @@
 import asyncio
-import re
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from hydrogram.errors import FloodWait
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -11,7 +9,7 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-TARGET_BOT = "@ProSearchM5Bot"
+TARGET_BOT = "@Movie_Channel_06_bot"
 MY_CHANNEL = -1004296254082
 UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 # ----------------------------------------
@@ -26,8 +24,8 @@ async def main():
         welcome_text = (
             f"👋 **ഹലോ {message.from_user.mention},**\n\n"
             "🎬 **Movie Finder Bot**-ലേക്ക് സ്വാഗതം!\n\n"
-            "നിങ്ങൾക്ക് ആവശ്യമായ ഏത് സിനിമയുടെയും പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക.\n\n"
-            "✨ *ഉദാഹരണത്തിന്:* `Madhura Naranga`"
+            "സിനിമയുടെ പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക.\n\n"
+            "✨ *ഉദാഹരണത്തിന്:* `Naran`"
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
@@ -44,21 +42,19 @@ async def main():
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ഫയൽ കണ്ടെത്തുന്നു, ദയവായി കാത്തിരിക്കൂ...*"
+            f"⏳ *ഫയലുകൾ തിരയുന്നു, കാത്തിരിക്കൂ...*"
         )
 
         try:
-            # Step 1: ടാർഗെറ്റ് ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
+            # Step 1: TARGET_BOT-ലേക്ക് സിനിമ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(6)  # ഡിലെ 6 സെക്കൻഡ് ആക്കി
+            await asyncio.sleep(5)
 
-            target_message = None
             target_button = None
 
-            # Step 2: റിസൾട്ട് കണ്ടുപിടിക്കുന്നു
+            # Step 2: റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ ബട്ടൺ കണ്ടുപിടിക്കുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.reply_markup:
-                    target_message = reply
                     for row in reply.reply_markup.inline_keyboard:
                         for btn in row:
                             if "NEXT" not in btn.text:
@@ -69,56 +65,42 @@ async def main():
                 if target_button:
                     break
 
-            if target_message and target_button:
+            if target_button:
+                # ബട്ടൺ Web Link (URL) ആണെങ്കിൽ:
                 if target_button.url:
+                    button_markup = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(f"📥 {target_button.text}", url=target_button.url)],
+                        [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
+                    ])
+
                     await status_msg.edit_text(
-                        f"🎬 **ബട്ടൺ ലിങ്ക് കണ്ടെത്തി!**\n"
-                        f"📁 `{target_button.text}`\n\n"
-                        f"🔗 [ഇവിടെ ക്ലിക്ക് ചെയ്തു ഫയൽ തുറക്കുക]({target_button.url})"
+                        f"🎉 **സിനിമ ഫയൽ കണ്ടെത്തി!**\n\n"
+                        f"🎬 **{movie_name}**\n\n"
+                        f"👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ലിങ്ക് വഴി ഡൗൺലോഡ് ചെയ്യുക:",
+                        reply_markup=button_markup
                     )
+                
+                # Normal Callback Button ആണെങ്കിൽ:
                 elif target_button.callback_data:
-                    await status_msg.edit_text(
-                        f"🎬 **ഫയൽ കണ്ടെത്തി! പ്രോസസ്സ് ചെയ്യുന്നു...**\n"
-                        f"📁 `{target_button.text}`\n\n"
-                        f"⏳ *വീഡിയോ ലഭിക്കാൻ കാത്തിരിക്കൂ...*"
+                    await status_msg.edit_text("⏳ ഫയൽ ഡൗൺലോഡ് ചെയ്യുന്നു...")
+                    await userbot.request_callback_answer(
+                        chat_id=TARGET_BOT,
+                        message_id=reply.id,
+                        callback_data=target_button.callback_data
                     )
-
-                    # Callback Click
-                    try:
-                        await userbot.request_callback_answer(
-                            chat_id=TARGET_BOT,
-                            message_id=target_message.id,
-                            callback_data=target_button.callback_data
-                        )
-                    except FloodWait as e:
-                        await asyncio.sleep(e.value)
-                        await userbot.request_callback_answer(
-                            chat_id=TARGET_BOT,
-                            message_id=target_message.id,
-                            callback_data=target_button.callback_data
-                        )
+                    await asyncio.sleep(5)
                     
-                    await asyncio.sleep(7)
-
-                    file_sent = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
-                        if file_msg.id > target_message.id and (file_msg.document or file_msg.video or file_msg.audio):
+                        if file_msg.id > reply.id and (file_msg.document or file_msg.video):
                             await file_msg.forward(MY_CHANNEL)
                             await file_msg.copy(chat_id=message.chat.id)
-                            file_sent = True
-                            break
-
-                    if file_sent:
-                        await status_msg.delete()
-                    else:
-                        await status_msg.edit_text("⚠️ ഫയൽ ലഭിക്കാൻ വൈകുന്നു. ദയവായി വീണ്ടും ശ്രമിക്കുക.")
+                            await status_msg.delete()
+                            return
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ലിങ്കുകൾ ലഭ്യമായില്ല."
                 )
 
-        except FloodWait as e:
-            await status_msg.edit_text(f"⏳ **ടെലഗ്രാം പരിധി കടന്നു.** `{e.value}` സെക്കൻഡിന് ശേഷം വീണ്ടും ശ്രമിക്കുക.")
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
