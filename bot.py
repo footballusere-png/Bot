@@ -1,6 +1,6 @@
 import asyncio
 from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -13,6 +13,9 @@ TARGET_BOT = "@ProSearchM5Bot"
 MY_CHANNEL = -1004296254082
 UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 # ----------------------------------------
+
+# Temporarily store exact button queries
+SEARCH_CACHE = {}
 
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
@@ -42,61 +45,73 @@ async def main():
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ഫയലുകൾ കണ്ടെത്തുന്നു, ദയവായി അല്പം കാത്തിരിക്കൂ...*"
+            f"⏳ *ഫയലുകൾ കണ്ടെത്തുന്നു, ദയവായി കാത്തിരിക്കൂ...*"
         )
 
         try:
-            # Target ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
 
-            clicked_buttons = 0
-
-            # Target ബോട്ടിൽ വന്ന റിസൾട്ട് മെസ്സേജ് പരിശോധിക്കുന്നു
+            buttons = []
+            btn_count = 0
+            
+            # Target ബോട്ട് നൽകിയ ബട്ടണുകളിലെ ഫയൽ നെയിമുകൾ ടെക്സ്റ്റ് ആയി എടുക്കുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.reply_markup:
-                    # മെസ്സേജിലെ ബട്ടണുകളിൽ ഓട്ടോമാറ്റിക് ആയി ക്ലിക്ക് ചെയ്യുന്നു (Max 5 Files)
                     for row in reply.reply_markup.inline_keyboard:
                         for btn in row:
-                            if btn.callback_data and clicked_buttons < 5:
-                                try:
-                                    await userbot.request_callback_answer(
-                                        chat_id=TARGET_BOT,
-                                        message_id=reply.id,
-                                        callback_data=btn.callback_data
-                                    )
-                                    clicked_buttons += 1
-                                    await asyncio.sleep(2) # ഫയൽ ലോഡ് ആകാൻ ചെറിയ സമയം
-                                except Exception as btn_err:
-                                    print(f"Button Click Error: {btn_err}")
-                                    continue
+                            if "NEXT" not in btn.text and btn_count < 8:
+                                # ബട്ടണിന്റെ ടെക്സ്റ്റ് മാത്രം സൂക്ഷിക്കുന്നു
+                                cb_key = f"mov_{btn_count}"
+                                SEARCH_CACHE[cb_key] = btn.text
+                                buttons.append([InlineKeyboardButton(btn.text, callback_data=cb_key)])
+                                btn_count += 1
 
-            # ബട്ടൺ ക്ലിക്ക് ചെയ്തതിന് ശേഷം വന്ന വിഡിയോ/ഫയൽ മെസ്സേജുകൾ തപ്പിയെടുക്കുന്നു
-            await asyncio.sleep(3)
-            sent_files_count = 0
-
-            async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=10):
-                if file_msg.id > sent_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
-                    # 1. ചാനലിലേക്ക് ഫോർവേഡ് ചെയ്യുന്നു
-                    await file_msg.forward(MY_CHANNEL)
-                    
-                    # 2. യൂസറുടെ ചാറ്റിലേക്ക് ഡയറക്ട് ഫയൽ കോപ്പി ചെയ്തു നൽകുന്നു
-                    await file_msg.copy(chat_id=message.chat.id)
-                    sent_files_count += 1
-                    await asyncio.sleep(1)
-
-            if sent_files_count > 0:
-                await status_msg.delete() # ഫയലുകൾ അയച്ച ശേഷം Status Message ഡിലീറ്റ് ചെയ്യും
+            if buttons:
+                buttons.append([InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)])
+                await status_msg.edit_text(
+                    f"🎉 **സിനിമ കണ്ടെത്തിയിരിക്കുന്നു!**\n\n🎬 **{movie_name}**\n\n👇 ആവശ്യമായ ഫയൽ ക്ലിക്ക് ചെയ്ത് ഡൗൺലോഡ് ചെയ്യുക:",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ഡയറക്ട് ആയി ലഭിച്ചില്ല.\n"
-                    "Spelling കൃത്യമായി ടൈപ്പ് ചെയ്തു വീണ്ടും ശ്രമിക്കുക."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
                 )
 
         except Exception as e:
             await status_msg.edit_text(f"⚠️ **ഒരു സാങ്കേതിക തടസ്സം നേരിട്ടു!**\n\n`{e}`")
 
-    # Start Both Clients
+    # 3. Handle User Button Clicks
+    @main_bot.on_callback_query()
+    async def handle_callback(client: Client, callback_query: CallbackQuery):
+        data = callback_query.data
+        
+        if data in SEARCH_CACHE:
+            file_query = SEARCH_CACHE[data]
+            await callback_query.answer("⏳ ഫയൽ പ്രോസസ്സ് ചെയ്യുന്നു, ദയവായി കാത്തിരിക്കൂ...", show_alert=False)
+            
+            try:
+                # Userbot ആ നിർദ്ദിഷ്ട ഫയൽ പേര് ടാർഗെറ്റ് ബോട്ടിലേക്ക് അയക്കുന്നു
+                sent_req = await userbot.send_message(TARGET_BOT, file_query)
+                await asyncio.sleep(6)
+                
+                found = False
+                # വന്ന വീഡിയോ ഫയൽ യൂസർക്കും ചാനലിലേക്കും ഫോർവേഡ് ചെയ്യുന്നു
+                async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
+                    if file_msg.id > sent_req.id and (file_msg.document or file_msg.video or file_msg.audio):
+                        await file_msg.forward(MY_CHANNEL) # ചാനലിലേക്ക്
+                        await file_msg.copy(chat_id=callback_query.message.chat.id) # യൂസർക്ക്
+                        found = True
+                        break
+
+                if not found:
+                    await callback_query.message.reply_text("⚠️ ഫയൽ ലഭിക്കാൻ അല്പം വൈകുന്നു. ദയവായി വീണ്ടും ബട്ടൺ അമർത്തുക.")
+
+            except Exception as e:
+                await callback_query.message.reply_text(f"⚠️ സാങ്കേതിക പ്രശ്നം: `{e}`")
+        else:
+            await callback_query.answer("ഈ സെർച്ച് ലേറ്റ് ആയിപ്പോയി. വീണ്ടും സിനിമയുടെ പേര് അയക്കുക.", show_alert=True)
+
     await userbot.start()
     await main_bot.start()
     print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
