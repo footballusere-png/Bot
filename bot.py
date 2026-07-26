@@ -1,4 +1,5 @@
 import asyncio
+import re
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -9,7 +10,7 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-TARGET_BOT = "@Movie_Channel_06_bot"
+TARGET_BOT = "@FilesSearchBot"
 MY_CHANNEL = -1004296254082
 UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 # ----------------------------------------
@@ -50,55 +51,63 @@ async def main():
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
             await asyncio.sleep(5)
 
-            target_button = None
+            first_link = None
+            first_link_text = ""
 
-            # Step 2: റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ ബട്ടൺ കണ്ടുപിടിക്കുന്നു
+            # Step 2: റിസൾട്ടിൽ നിന്നും ആദ്യത്തെ Text Hyperlink കണ്ടെത്തുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
-                if reply.id > sent_msg.id and reply.reply_markup:
-                    for row in reply.reply_markup.inline_keyboard:
-                        for btn in row:
-                            if "NEXT" not in btn.text:
-                                target_button = btn
-                                break
-                        if target_button:
+                if reply.id > sent_msg.id and reply.text and reply.entities:
+                    for entity in reply.entities:
+                        if entity.type.name == "TEXT_LINK" and entity.url:
+                            first_link = entity.url
+                            start = entity.offset
+                            end = entity.offset + entity.length
+                            first_link_text = reply.text[start:end]
                             break
-                if target_button:
+                if first_link:
                     break
 
-            if target_button:
-                # ബട്ടൺ Web Link (URL) ആണെങ്കിൽ:
-                if target_button.url:
-                    button_markup = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(f"📥 {target_button.text}", url=target_button.url)],
-                        [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
-                    ])
+            if first_link:
+                # 1-ാമത്തെ ഫയൽ ലിങ്ക് ടെലഗ്രാം ബോട്ടിലെ തന്നെയുള്ള deep link (/start=...) ആണെങ്കിൽ:
+                if "t.me/" in first_link and "start=" in first_link:
+                    bot_username = first_link.split("t.me/")[1].split("?")[0]
+                    param = first_link.split("start=")[1]
 
-                    await status_msg.edit_text(
-                        f"🎉 **സിനിമ ഫയൽ കണ്ടെത്തി!**\n\n"
-                        f"🎬 **{movie_name}**\n\n"
-                        f"👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ലിങ്ക് വഴി ഡൗൺലോഡ് ചെയ്യുക:",
-                        reply_markup=button_markup
-                    )
-                
-                # Normal Callback Button ആണെങ്കിൽ:
-                elif target_button.callback_data:
-                    await status_msg.edit_text("⏳ ഫയൽ ഡൗൺലോഡ് ചെയ്യുന്നു...")
-                    await userbot.request_callback_answer(
-                        chat_id=TARGET_BOT,
-                        message_id=reply.id,
-                        callback_data=target_button.callback_data
-                    )
+                    await status_msg.edit_text("⏳ *ആദ്യത്തെ ഫയൽ ഡൗൺലോഡ് ചെയ്യുന്നു...*")
+
+                    # Userbot വഴി ആ ലിങ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
+                    start_msg = await userbot.send_message(f"@{bot_username}", f"/start {param}")
                     await asyncio.sleep(5)
-                    
-                    async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
-                        if file_msg.id > reply.id and (file_msg.document or file_msg.video):
+
+                    file_sent = False
+                    async for file_msg in userbot.get_chat_history(f"@{bot_username}", limit=5):
+                        if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
                             await file_msg.forward(MY_CHANNEL)
                             await file_msg.copy(chat_id=message.chat.id)
-                            await status_msg.delete()
-                            return
+                            file_sent = True
+                            break
+
+                    if file_sent:
+                        await status_msg.delete()
+                    else:
+                        await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ കഴിഞ്ഞില്ല. വീണ്ടും ശ്രമിക്കുക.")
+
+                # പുറത്തുള്ള വെബ് ലിങ്ക് ആണെങ്കിൽ ബട്ടൺ നൽകുന്നു:
+                else:
+                    button_markup = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(f"📥 {first_link_text[:30]}...", url=first_link)],
+                        [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
+                    ])
+                    await status_msg.edit_text(
+                        f"🎉 **ഫയൽ കണ്ടെത്തി!**\n\n"
+                        f"🎬 **{movie_name}**\n"
+                        f"📁 `{first_link_text}`\n\n"
+                        f"👇 ഡൗൺലോഡ് ചെയ്യാൻ ബട്ടൺ അമർത്തുക:",
+                        reply_markup=button_markup
+                    )
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ലിങ്കുകൾ ലഭ്യമായില്ല."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
                 )
 
         except Exception as e:
