@@ -54,7 +54,7 @@ async def main():
     async def start_cmd(client: Client, message: Message):
         save_user(message.from_user.id)
         
-        # Force Join Check (First Layer)
+        # Check Force Join
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -84,7 +84,7 @@ async def main():
     @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_ID))
     async def broadcast_cmd(client: Client, message: Message):
         if not message.reply_to_message and len(message.command) < 2:
-            await message.reply_text("⚠️ **ബ്രോഡ്കാസ്റ്റ് ചെയ്യാൻ ഒരു മെസ്സേജിന് റിപ്ലൈ ചെയ്യുക അല്ലെങ്കിൽ ടെക്സ്റ്റ് അയക്കുക.**\n\n*ഉദാഹരണം:* `/broadcast ഹലോ ഫ്രണ്ട്സ്`")
+            await message.reply_text("⚠️ **ബ്രോഡ്കാസ്റ്റ് ചെയ്യാൻ ഒരു മെസ്സേജിന് റിപ്ലൈ ചെയ്യുക അല്ലെങ്കിൽ ടെക്സ്റ്റ് അയക്കുക.**")
             return
 
         if not os.path.exists(USER_DB_FILE):
@@ -119,12 +119,12 @@ async def main():
             f"❌ പരാജയപ്പെട്ടത്: `{failed}`"
         )
 
-    # 3. Movie Search Request
+    # 3. Movie Search Request (Direct File Fetching)
     @main_bot.on_message(filters.text & filters.private)
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
 
-        # Force Join Check (Before Processing Search)
+        # Force Sub Check
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -149,67 +149,57 @@ async def main():
         )
 
         try:
+            # Step 1: TARGET_BOT-ലേക്ക് സിനിമ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
             await asyncio.sleep(5)
 
             first_link = None
-            first_link_text = ""
 
+            # Step 2: റിസൾട്ടിൽ നിന്നുള്ള ആദ്യത്തെ Hyperlink അല്ലെങ്കിൽ deep-link കണ്ടെത്തുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.text and reply.entities:
                     for entity in reply.entities:
                         if entity.type.name == "TEXT_LINK" and entity.url:
                             first_link = entity.url
-                            start = entity.offset
-                            end = entity.offset + entity.length
-                            first_link_text = reply.text[start:end]
                             break
                 if first_link:
                     break
 
-            if first_link:
-                # Telegram Start Param Link ആണെങ്കിൽ
-                if "t.me/" in first_link and "start=" in first_link:
-                    try:
-                        bot_username = first_link.split("t.me/")[1].split("?")[0]
-                        param = first_link.split("start=")[1]
+            if first_link and "t.me/" in first_link:
+                await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
 
-                        await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
-
-                        start_msg = await userbot.send_message(f"@{bot_username}", f"/start {param}")
-                        await asyncio.sleep(6)
-
-                        file_sent = False
-                        async for file_msg in userbot.get_chat_history(f"@{bot_username}", limit=5):
-                            if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
-                                ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
-                                await main_bot.copy_message(
-                                    chat_id=message.chat.id,
-                                    from_chat_id=MY_CHANNEL,
-                                    message_id=ch_msg.id
-                                )
-                                file_sent = True
-                                break
-
-                        if file_sent:
-                            await status_msg.delete()
-                        else:
-                            await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ കഴിഞ്ഞില്ല. വീണ്ടും ശ്രമിക്കുക.")
-                    except Exception as err:
-                        await status_msg.edit_text(f"⚠️ ലിങ്ക് പ്രോസസ്സ് ചെയ്യുന്നതിൽ തടസ്സം: `{err}`")
-
+                # deep link പ്രോസസ്സ് ചെയ്യുന്നു (/start=xxx)
+                bot_username = TARGET_BOT
+                if "start=" in first_link:
+                    param = first_link.split("start=")[1]
+                    if "?" in param:
+                        param = param.split("?")[0]
+                    start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
                 else:
-                    button_markup = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(f"📥 {first_link_text[:30]}...", url=first_link)],
-                        [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
-                    ])
-                    await status_msg.edit_text(
-                        f"🎉 **ഫയൽ കണ്ടെത്തി!**\n\n"
-                        f"🎬 **{movie_name}**\n"
-                        f"📁 `{first_link_text}`\n\n"
-                        f"👇 ഡൗൺലോഡ് ചെയ്യാൻ ബട്ടൺ അമർത്തുക:",
-                        reply_markup=button_markup
-                    )
+                    start_msg = sent_msg
+
+                await asyncio.sleep(6)
+
+                # Step 3: ബാക്ക്ഗ്രൗണ്ടിൽ ലഭിച്ച വീഡിയോ/ഡോക്യുമെന്റ് നേരിട്ട് യൂസറുടെ ചാറ്റിലേക്ക് ഫോർവേഡ്/കോപ്പി ചെയ്യുന്നു
+                file_sent = False
+                async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=6):
+                    if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
+                        # ആദ്യം നിങ്ങളുടെ ചാനലിലേക്ക് ബാക്കപ്പ് അയക്കുന്നു
+                        ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
+                        
+                        # തുടര്‍ന്ന് direct ആയി ഉപയോക്താവിന്റെ ചാറ്റിലേക്ക് ബോട്ട് വഴി അയക്കുന്നു
+                        await main_bot.copy_message(
+                            chat_id=message.chat.id,
+                            from_chat_id=MY_CHANNEL,
+                            message_id=ch_msg.id
+                        )
+                        file_sent = True
+                        break
+
+                if file_sent:
+                    await status_msg.delete()
+                else:
+                    await status_msg.edit_text("⚠️ ഫയൽ ലഭിക്കാൻ തടസ്സം നേരിട്ടു. വീണ്ടും ശ്രമിക്കുക.")
             else:
                 await status_msg.edit_text(
                     f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
