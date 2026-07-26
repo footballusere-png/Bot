@@ -2,7 +2,7 @@ import asyncio
 import os
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from hydrogram.errors import UserNotParticipant, FloodWait
+from hydrogram.errors import UserNotParticipant
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -79,7 +79,7 @@ async def main():
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
-    # 2. Admin Command: /add [Movie Name] (നേരിട്ട് ബോട്ടിൽ പോയി സെർച്ച് ചെയ്ത് ചാനലിൽ ആഡ് ചെയ്യുന്നു)
+    # 2. Admin Command: /add [Movie Name] (ബോട്ടിൽ പോയി സെർച്ച് ചെയ്ത് ചാനലിൽ ആഡ് ചെയ്യുന്നു)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         lines = message.text.split("\n")
@@ -105,14 +105,14 @@ async def main():
         failed_count = 0
 
         for movie in movies_to_process:
-            await status_msg.edit_text(f"🔍 സെർച്ച് ചെയ്യുന്നു: `{movie}`")
             try:
-                # Step 1: TARGET_BOT-ലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
+                await status_msg.edit_text(f"🔍 സെർച്ച് ചെയ്യുന്നു: `{movie}`")
+                
+                # TARGET_BOT-ലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
                 sent_msg = await userbot.send_message(TARGET_BOT, movie)
                 await asyncio.sleep(6)
 
                 first_link = None
-                # Step 2: റിസൾട്ടിൽ നിന്ന് ലിങ്ക് എടുക്കുന്നു
                 async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
                     if reply.id > sent_msg.id and reply.text and reply.entities:
                         for entity in reply.entities:
@@ -122,13 +122,11 @@ async def main():
                     if first_link:
                         break
 
-                # Step 3: ഡീപ് ലിങ്ക് വഴി ഫയൽ വരുത്തുന്നു
                 if first_link and "start=" in first_link:
                     param = first_link.split("start=")[1].split("?")[0]
                     start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
                     await asyncio.sleep(6)
 
-                    # Step 4: ഫയൽ എടുത്ത് ചാനലിലേക്ക് സേവ് ചെയ്യുന്നു
                     file_added = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
                         if file_msg.id > start_msg.id and (file_msg.document or file_msg.video):
@@ -147,16 +145,16 @@ async def main():
                 failed_count += 1
 
         await status_msg.edit_text(
-            f"✅ **പ്രക്രിയ പൂർത്തിയായി!**\n\n"
-            f"🎯 വിജയകരമായി ചാനലിൽ ആഡ് ചെയ്തവ: `{success_count}`\n"
-            f"❌ കിട്ടാത്തവ / പരാജയപ്പെട്ടവ: `{failed_count}`"
+            f"✨ **പ്രക്രിയ വിജയകരമായി പൂർത്തിയായി!**\n\n"
+            f"📥 ചാനലിലേക്ക് സേവ് ചെയ്തവ: `{success_count}`\n"
+            f"❌ കണ്ടെത്താനാവാത്തവ: `{failed_count}`"
         )
 
-    # 3. User Search Handler (യൂസർ ചോദിക്കുമ്പോൾ സ്വന്തം ചാനലിൽ നിന്ന് മാത്രം ഫയൽ നൽകുന്നു - ലൂപ്പ് തടയാൻ ഫിൽട്ടറുകൾ ശക്തമാക്കിയിരിക്കുന്നു)
+    # 3. User Search Handler (യൂസർ ചോദിക്കുമ്പോൾ ചാനലിൽ നിന്ന് എടുത്ത് നൽകുന്നു - ലൂപ്പ് പൂർണ്ണമായി തടഞ്ഞു)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
-        # ബോട്ട് അയക്കുന്ന സ്വന്തം മെസ്സേജുകളെ ഒഴിവാക്കാൻ (ലൂപ്പ് തടയാൻ)
-        if message.from_user.is_bot:
+        # ബോട്ട് അയക്കുന്ന സ്വന്തം മെസ്സേജുകളെ പൂർണ്ണമായി അവഗണിക്കുന്നു (ലൂപ്പ് തടയാൻ)
+        if message.outgoing or message.from_user.is_bot:
             return
 
         save_user(message.from_user.id)
@@ -178,7 +176,7 @@ async def main():
             )
             return
 
-        status_msg = await message.reply_text(f"🔍 **സെർച്ച് ചെയ്യുന്നു:** `{movie_name}`...")
+        status_msg = await message.reply_text(f"🔎 `{movie_name}` സെർച്ച് ചെയ്യുന്നു...")
 
         try:
             file_found = False
@@ -193,17 +191,22 @@ async def main():
                     file_found = True
                     break
 
-            if file_found:
-                await status_msg.delete()  # സെർച്ച് ചെയ്തപ്പോൾ വന്ന വെറും ടെക്സ്റ്റ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
-            else:
-                await status_msg.edit_text(f"❌ **'{movie_name}'** ഡാറ്റാബേസിൽ ലഭ്യമല്ല.")
+            # സ്റ്റാറ്റസ് മെസ്സേജുകൾ ഒഴിവാക്കാൻ
+            await status_msg.delete()
+
+            if not file_found:
+                await message.reply_text(f"❌ **'{movie_name}'** സംബന്ധമായ ഫയലുകൾ ഒന്നും കണ്ടെത്താനായില്ല.")
 
         except Exception as e:
-            await status_msg.edit_text(f"⚠️ ഒരു ചെറിയ തടസ്സം നേരിട്ടു: `{e}`")
+            try:
+                await status_msg.delete()
+            except:
+                pass
+            print(f"Search Error: {e}")
 
     await userbot.start()
     await main_bot.start()
-    print("🚀 Movie Bot വിജയകരമായി റൺ ആയി!")
+    print("🚀 Professional Movie Bot വിജയകരമായി റൺ ആയി!")
 
     await asyncio.Event().wait()
 
