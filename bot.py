@@ -119,17 +119,16 @@ async def main():
             f"❌ പരാജയപ്പെട്ടത്: `{failed}`"
         )
 
-    # 3. Movie Search Request (കമാൻഡുകൾ ഒഴിവാക്കാൻ ~filters.command ചേർത്തു)
-    @main_bot.on_message(filters.text & filters.private & ~filters.command)
+    # 3. Movie Search Request (~filters.regex(r"^/") ഉപയോഗിച്ച് ഫിക്സ് ചെയ്തു)
+    @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/"))
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
 
-        # 1. കമാൻഡുകളോ സ്പെഷ്യൽ ലിങ്കുകളോ ആണെങ്കിൽ ഒഴിവാക്കുന്നു
         movie_name = message.text.strip()
-        if movie_name.startswith("/") or "t.me/" in movie_name:
+        if "t.me/" in movie_name:
             return
 
-        # 2. Force Sub Check
+        # Force Sub Check
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -176,7 +175,6 @@ async def main():
                     if "?" in param:
                         param = param.split("?")[0]
                     
-                    # ടാർഗെറ്റ് ബോട്ടിലേക്ക് ഡീപ് ലിങ്ക് അയക്കുന്നു
                     start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
                 else:
                     start_msg = sent_msg
