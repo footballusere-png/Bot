@@ -42,38 +42,32 @@ async def main():
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
-            f"⏳ *ദയവായി കുറച്ചു സമയം കാത്തിരിക്കൂ...*"
+            f"⏳ *ഫയലുകൾ കണ്ടെത്തുന്നു, ദയവായി അല്പം കാത്തിരിക്കൂ...*"
         )
 
         try:
+            # 1. Target ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(5)
+            await asyncio.sleep(7)  # റിപ്ലൈ വരാൻ 7 സെക്കന്റ് സമയം നൽകുന്നു
 
-            file_buttons = []
-            count = 0
+            found_files = 0
 
-            async for reply in userbot.search_messages(TARGET_BOT, limit=5):
+            # 2. Target ബോട്ടിൽ വന്ന പുതിയ ഫയലുകൾ തപ്പിയെടുക്കുന്നു
+            async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
                 if reply.id > sent_msg.id:
-                    fwd = await reply.forward(MY_CHANNEL)
+                    # നിങ്ങളുടെ ചാനലിലേക്ക് ഫയൽ സൂക്ഷിക്കാൻ ഫോർവേഡ് ചെയ്യുന്നു
+                    await reply.forward(MY_CHANNEL)
                     
-                    clean_channel_id = str(MY_CHANNEL).replace("-100", "")
-                    file_link = f"https://t.me/c/{clean_channel_id}/{fwd.id}"
-                    
-                    btn_text = reply.text[:30] if reply.text else f"📥 Movie File {count+1}"
-                    file_buttons.append([InlineKeyboardButton(btn_text, url=file_link)])
-                    count += 1
+                    # 3. യൂസറുടെ ചാറ്റിലേക്ക് ഡയറക്ട് ഫയൽ അയക്കുന്നു!
+                    await reply.copy(chat_id=message.chat.id)
+                    found_files += 1
 
-            if file_buttons:
-                file_buttons.append([InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)])
-                success_text = (
-                    f"🎉 **സിനിമ കണ്ടെത്തിയിരിക്കുന്നു!**\n\n"
-                    f"🎬 **മൂവി Name:** `{movie_name}`\n\n"
-                    f"👇 താഴെ നൽകിയിരിക്കുന്ന ബട്ടണുകളിൽ അമർത്തി ഫയലുകൾ ഡൗൺലോഡ് ചെയ്യാം:"
-                )
-                await status_msg.edit_text(text=success_text, reply_markup=InlineKeyboardMarkup(file_buttons))
+            if found_files > 0:
+                await status_msg.delete()  # ഡൗൺലോഡിംഗ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് ഫയലുകൾ മാത്രം കാണിക്കും
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഡയറക്ട് ഫയലുകൾ ലഭ്യമല്ല.\n"
+                    "Spelling തെറ്റുകൂടാതെ വീണ്ടും ടൈപ്പ് ചെയ്തു നോക്കൂ."
                 )
 
         except Exception as e:
@@ -84,7 +78,6 @@ async def main():
     await main_bot.start()
     print("🚀 Movie Bot & Userbot വിജയകരമായി റൺ ആയി!")
 
-    # Keep Python running without crashing
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
