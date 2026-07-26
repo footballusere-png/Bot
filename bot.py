@@ -1,4 +1,5 @@
 import asyncio
+import re
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
@@ -14,8 +15,12 @@ MY_CHANNEL = -1004296254082
 UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 # ----------------------------------------
 
-# Temporarily store exact button queries
 SEARCH_CACHE = {}
+
+def clean_file_name(text: str) -> str:
+    # Remove bracket sizes like [2.20 GB], [735 MB] etc.
+    cleaned = re.sub(r'\[.*?\]', '', text).strip()
+    return cleaned
 
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
@@ -55,15 +60,17 @@ async def main():
             buttons = []
             btn_count = 0
             
-            # Target ബോട്ട് നൽകിയ ബട്ടണുകളിലെ ഫയൽ നെയിമുകൾ ടെക്സ്റ്റ് ആയി എടുക്കുന്നു
             async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
                 if reply.id > sent_msg.id and reply.reply_markup:
                     for row in reply.reply_markup.inline_keyboard:
                         for btn in row:
                             if "NEXT" not in btn.text and btn_count < 8:
-                                # ബട്ടണിന്റെ ടെക്സ്റ്റ് മാത്രം സൂക്ഷിക്കുന്നു
+                                # Clean search query string
+                                cleaned_query = clean_file_name(btn.text)
                                 cb_key = f"mov_{btn_count}"
-                                SEARCH_CACHE[cb_key] = btn.text
+                                SEARCH_CACHE[cb_key] = cleaned_query
+                                
+                                # Userbot shows full name with size on user's bot
                                 buttons.append([InlineKeyboardButton(btn.text, callback_data=cb_key)])
                                 btn_count += 1
 
@@ -87,16 +94,15 @@ async def main():
         data = callback_query.data
         
         if data in SEARCH_CACHE:
-            file_query = SEARCH_CACHE[data]
-            await callback_query.answer("⏳ ഫയൽ പ്രോസസ്സ് ചെയ്യുന്നു, ദയവായി കാത്തിരിക്കൂ...", show_alert=False)
+            clean_query = SEARCH_CACHE[data]
+            await callback_query.answer("⏳ ഫയൽ പ്രോസസ്സ് ചെയ്യുന്നു, കാത്തിരിക്കൂ...", show_alert=False)
             
             try:
-                # Userbot ആ നിർദ്ദിഷ്ട ഫയൽ പേര് ടാർഗെറ്റ് ബോട്ടിലേക്ക് അയക്കുന്നു
-                sent_req = await userbot.send_message(TARGET_BOT, file_query)
+                # Userbot sends cleaned name without size brackets
+                sent_req = await userbot.send_message(TARGET_BOT, clean_query)
                 await asyncio.sleep(6)
                 
                 found = False
-                # വന്ന വീഡിയോ ഫയൽ യൂസർക്കും ചാനലിലേക്കും ഫോർവേഡ് ചെയ്യുന്നു
                 async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
                     if file_msg.id > sent_req.id and (file_msg.document or file_msg.video or file_msg.audio):
                         await file_msg.forward(MY_CHANNEL) # ചാനലിലേക്ക്
@@ -105,7 +111,7 @@ async def main():
                         break
 
                 if not found:
-                    await callback_query.message.reply_text("⚠️ ഫയൽ ലഭിക്കാൻ അല്പം വൈകുന്നു. ദയവായി വീണ്ടും ബട്ടൺ അമർത്തുക.")
+                    await callback_query.message.reply_text("⚠️ ഫയൽ ലഭ്യമാക്കാൻ അല്പം വൈകുന്നു. ദയവായി വീണ്ടും ബട്ടൺ അമർത്തുക.")
 
             except Exception as e:
                 await callback_query.message.reply_text(f"⚠️ സാങ്കേതിക പ്രശ്നം: `{e}`")
