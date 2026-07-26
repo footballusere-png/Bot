@@ -25,7 +25,7 @@ async def main():
             f"👋 **ഹലോ {message.from_user.mention},**\n\n"
             "🎬 **Movie Finder Bot**-ലേക്ക് സ്വാഗതം!\n\n"
             "നിങ്ങൾക്ക് ആവശ്യമായ ഏത് സിനിമയുടെയും പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക.\n\n"
-            "✨ *ഉദാഹരണത്തിന്:* `Manjummel Boys`"
+            "✨ *ഉദാഹരണത്തിന്:* `Naran`"
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
@@ -46,28 +46,51 @@ async def main():
         )
 
         try:
-            # 1. Target ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
+            # Target ബോട്ടിലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(7)  # റിപ്ലൈ വരാൻ 7 സെക്കന്റ് സമയം നൽകുന്നു
+            await asyncio.sleep(4)
 
-            found_files = 0
+            clicked_buttons = 0
 
-            # 2. Target ബോട്ടിൽ വന്ന പുതിയ ഫയലുകൾ തപ്പിയെടുക്കുന്നു
-            async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
-                if reply.id > sent_msg.id:
-                    # നിങ്ങളുടെ ചാനലിലേക്ക് ഫയൽ സൂക്ഷിക്കാൻ ഫോർവേഡ് ചെയ്യുന്നു
-                    await reply.forward(MY_CHANNEL)
+            # Target ബോട്ടിൽ വന്ന റിസൾട്ട് മെസ്സേജ് പരിശോധിക്കുന്നു
+            async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
+                if reply.id > sent_msg.id and reply.reply_markup:
+                    # മെസ്സേജിലെ ബട്ടണുകളിൽ ഓട്ടോമാറ്റിക് ആയി ക്ലിക്ക് ചെയ്യുന്നു (Max 5 Files)
+                    for row in reply.reply_markup.inline_keyboard:
+                        for btn in row:
+                            if btn.callback_data and clicked_buttons < 5:
+                                try:
+                                    await userbot.request_callback_answer(
+                                        chat_id=TARGET_BOT,
+                                        message_id=reply.id,
+                                        callback_data=btn.callback_data
+                                    )
+                                    clicked_buttons += 1
+                                    await asyncio.sleep(2) # ഫയൽ ലോഡ് ആകാൻ ചെറിയ സമയം
+                                except Exception as btn_err:
+                                    print(f"Button Click Error: {btn_err}")
+                                    continue
+
+            # ബട്ടൺ ക്ലിക്ക് ചെയ്തതിന് ശേഷം വന്ന വിഡിയോ/ഫയൽ മെസ്സേജുകൾ തപ്പിയെടുക്കുന്നു
+            await asyncio.sleep(3)
+            sent_files_count = 0
+
+            async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=10):
+                if file_msg.id > sent_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
+                    # 1. ചാനലിലേക്ക് ഫോർവേഡ് ചെയ്യുന്നു
+                    await file_msg.forward(MY_CHANNEL)
                     
-                    # 3. യൂസറുടെ ചാറ്റിലേക്ക് ഡയറക്ട് ഫയൽ അയക്കുന്നു!
-                    await reply.copy(chat_id=message.chat.id)
-                    found_files += 1
+                    # 2. യൂസറുടെ ചാറ്റിലേക്ക് ഡയറക്ട് ഫയൽ കോപ്പി ചെയ്തു നൽകുന്നു
+                    await file_msg.copy(chat_id=message.chat.id)
+                    sent_files_count += 1
+                    await asyncio.sleep(1)
 
-            if found_files > 0:
-                await status_msg.delete()  # ഡൗൺലോഡിംഗ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് ഫയലുകൾ മാത്രം കാണിക്കും
+            if sent_files_count > 0:
+                await status_msg.delete() # ഫയലുകൾ അയച്ച ശേഷം Status Message ഡിലീറ്റ് ചെയ്യും
             else:
                 await status_msg.edit_text(
-                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഡയറക്ട് ഫയലുകൾ ലഭ്യമല്ല.\n"
-                    "Spelling തെറ്റുകൂടാതെ വീണ്ടും ടൈപ്പ് ചെയ്തു നോക്കൂ."
+                    f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ഡയറക്ട് ആയി ലഭിച്ചില്ല.\n"
+                    "Spelling കൃത്യമായി ടൈപ്പ് ചെയ്തു വീണ്ടും ശ്രമിക്കുക."
                 )
 
         except Exception as e:
