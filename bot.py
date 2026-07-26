@@ -119,12 +119,17 @@ async def main():
             f"❌ പരാജയപ്പെട്ടത്: `{failed}`"
         )
 
-    # 3. Movie Search Request (Direct File Fetching)
-    @main_bot.on_message(filters.text & filters.private)
+    # 3. Movie Search Request (കമാൻഡുകൾ ഒഴിവാക്കാൻ ~filters.command ചേർത്തു)
+    @main_bot.on_message(filters.text & filters.private & ~filters.command)
     async def handle_user_search(client: Client, message: Message):
         save_user(message.from_user.id)
 
-        # Force Sub Check
+        # 1. കമാൻഡുകളോ സ്പെഷ്യൽ ലിങ്കുകളോ ആണെങ്കിൽ ഒഴിവാക്കുന്നു
+        movie_name = message.text.strip()
+        if movie_name.startswith("/") or "t.me/" in movie_name:
+            return
+
+        # 2. Force Sub Check
         is_joined = await check_force_sub(client, message.from_user.id)
         if not is_joined:
             join_keyboard = InlineKeyboardMarkup([
@@ -138,10 +143,6 @@ async def main():
             )
             return
 
-        movie_name = message.text.strip()
-        if movie_name.startswith("/"):
-            return
-
         status_msg = await message.reply_text(
             f"🔍 **സെർച്ച് ചെയ്യുന്നു...**\n"
             f"🎬 **സിനിമ:** `{movie_name}`\n\n"
@@ -151,17 +152,18 @@ async def main():
         try:
             # Step 1: TARGET_BOT-ലേക്ക് സിനിമ പേര് അയക്കുന്നു
             sent_msg = await userbot.send_message(TARGET_BOT, movie_name)
-            await asyncio.sleep(5)
+            await asyncio.sleep(4)
 
             first_link = None
 
-            # Step 2: റിസൾട്ടിൽ നിന്നുള്ള ആദ്യത്തെ Hyperlink അല്ലെങ്കിൽ deep-link കണ്ടെത്തുന്നു
-            async for reply in userbot.get_chat_history(TARGET_BOT, limit=3):
-                if reply.id > sent_msg.id and reply.text and reply.entities:
-                    for entity in reply.entities:
-                        if entity.type.name == "TEXT_LINK" and entity.url:
-                            first_link = entity.url
-                            break
+            # Step 2: റിസൾട്ടിൽ നിന്നുള്ള ആദ്യത്തെ Hyperlink / deep-link കണ്ടെത്തുന്നു
+            async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
+                if reply.id > sent_msg.id and reply.text:
+                    if reply.entities:
+                        for entity in reply.entities:
+                            if entity.type.name == "TEXT_LINK" and entity.url:
+                                first_link = entity.url
+                                break
                 if first_link:
                     break
 
@@ -169,18 +171,19 @@ async def main():
                 await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
 
                 # deep link പ്രോസസ്സ് ചെയ്യുന്നു (/start=xxx)
-                bot_username = TARGET_BOT
                 if "start=" in first_link:
                     param = first_link.split("start=")[1]
                     if "?" in param:
                         param = param.split("?")[0]
+                    
+                    # ടാർഗെറ്റ് ബോട്ടിലേക്ക് ഡീപ് ലിങ്ക് അയക്കുന്നു
                     start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
                 else:
                     start_msg = sent_msg
 
-                await asyncio.sleep(6)
+                await asyncio.sleep(5)
 
-                # Step 3: ബാക്ക്ഗ്രൗണ്ടിൽ ലഭിച്ച വീഡിയോ/ഡോക്യുമെന്റ് നേരിട്ട് യൂസറുടെ ചാറ്റിലേക്ക് ഫോർവേഡ്/കോപ്പി ചെയ്യുന്നു
+                # Step 3: ഫയൽ യൂസറിലേക്ക് ബാക്കപ്പ് വഴി ഫോർവേഡ് ചെയ്യുന്നു
                 file_sent = False
                 async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=6):
                     if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
@@ -199,7 +202,7 @@ async def main():
                 if file_sent:
                     await status_msg.delete()
                 else:
-                    await status_msg.edit_text("⚠️ ഫയൽ ലഭിക്കാൻ തടസ്സം നേരിട്ടു. വീണ്ടും ശ്രമിക്കുക.")
+                    await status_msg.edit_text("⚠️ ഫയൽ ലഭ്യമായില്ല. ഫയൽ ലിങ്ക് വാലിഡ് ആണോ എന്ന് പരിശോധിക്കുക.")
             else:
                 await status_msg.edit_text(
                     f"❌ **ക്ഷമിക്കണം!**\n\n**'{movie_name}'** എന്ന സിനിമയുടെ ഫയലുകൾ ലഭ്യമല്ല."
