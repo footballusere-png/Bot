@@ -1,5 +1,4 @@
 import asyncio
-import re
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -73,17 +72,24 @@ async def main():
                     bot_username = first_link.split("t.me/")[1].split("?")[0]
                     param = first_link.split("start=")[1]
 
-                    await status_msg.edit_text("⏳ *ആദ്യത്തെ ഫയൽ ഡൗൺലോഡ് ചെയ്യുന്നു...*")
+                    await status_msg.edit_text("⏳ *ഫയൽ ലഭിക്കുന്നു, ദയവായി കാത്തിരിക്കൂ...*")
 
                     # Userbot വഴി ആ ലിങ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
                     start_msg = await userbot.send_message(f"@{bot_username}", f"/start {param}")
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(6)
 
                     file_sent = False
                     async for file_msg in userbot.get_chat_history(f"@{bot_username}", limit=5):
                         if file_msg.id > start_msg.id and (file_msg.document or file_msg.video or file_msg.audio):
-                            await file_msg.forward(MY_CHANNEL)
-                            await file_msg.copy(chat_id=message.chat.id)
+                            # Step 1: ആദ്യം ചാനലിലേക്ക് ഫയൽ അയക്കുന്നു
+                            ch_msg = await file_msg.copy(chat_id=MY_CHANNEL)
+                            
+                            # Step 2: Main Bot വഴി യൂസറുടെ ചാറ്റിലേക്ക് അയക്കുന്നു
+                            await main_bot.copy_message(
+                                chat_id=message.chat.id,
+                                from_chat_id=MY_CHANNEL,
+                                message_id=ch_msg.id
+                            )
                             file_sent = True
                             break
 
