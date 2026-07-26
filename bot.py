@@ -17,10 +17,17 @@ UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
 SEARCH_CACHE = {}
 
-def clean_file_name(text: str) -> str:
-    # Remove bracket sizes like [2.20 GB], [735 MB] etc.
+def extract_clean_movie_name(text: str) -> str:
+    # 1. [] ബ്രാക്കറ്റിലുള്ള Size ഒഴിവാക്കുന്നു
     cleaned = re.sub(r'\[.*?\]', '', text).strip()
-    return cleaned
+    
+    # 2. 'Rip' അല്ലെങ്കിൽ quality ടെക്സ്റ്റുകൾ തൊട്ടുള്ള ഭാഗങ്ങൾ ഒഴിവാക്കുന്നു
+    # Rip, Webrip, Bluray, 1080p, 720p, x264, x265, HEVC മുതലായവയ്ക്ക് ശേഷം ഉള്ളവ മുറിച്ചു മാറ്റുന്നു
+    match = re.split(r'\b(Rip|WEB-DL|WEBRip|Bluray|HDRip|1080p|720p|480p|x264|x265|HEVC)\b', cleaned, flags=re.IGNORECASE)
+    if match:
+        cleaned = match[0].strip()
+        
+    return cleaned if cleaned else text.strip()
 
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
@@ -65,12 +72,12 @@ async def main():
                     for row in reply.reply_markup.inline_keyboard:
                         for btn in row:
                             if "NEXT" not in btn.text and btn_count < 8:
-                                # Clean search query string
-                                cleaned_query = clean_file_name(btn.text)
+                                # Clean Query (e.g. "Naran 2005")
+                                cleaned_query = extract_clean_movie_name(btn.text)
                                 cb_key = f"mov_{btn_count}"
                                 SEARCH_CACHE[cb_key] = cleaned_query
                                 
-                                # Userbot shows full name with size on user's bot
+                                # Show original button label with size on user chat
                                 buttons.append([InlineKeyboardButton(btn.text, callback_data=cb_key)])
                                 btn_count += 1
 
@@ -98,7 +105,7 @@ async def main():
             await callback_query.answer("⏳ ഫയൽ പ്രോസസ്സ് ചെയ്യുന്നു, കാത്തിരിക്കൂ...", show_alert=False)
             
             try:
-                # Userbot sends cleaned name without size brackets
+                # Userbot sends cleaned title (e.g. "Naran 2005")
                 sent_req = await userbot.send_message(TARGET_BOT, clean_query)
                 await asyncio.sleep(6)
                 
