@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from threading import Thread
 from flask import Flask
 from hydrogram import Client, filters
@@ -24,8 +25,10 @@ UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 ADMIN_ID = 7312906293
 USER_DB_FILE = "users.txt"
 
-# Global variable to control Add feature status
+# Global variables
 ADD_ENABLED = True
+file_queue = asyncio.Queue()
+is_processing_queue = False
 # ----------------------------------------
 
 # Dummy Flask App to satisfy Render Port Binding requirement
@@ -61,9 +64,54 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
+# Helper Function: Remove Links and Clean Caption to Keep Only File Name
+def clean_caption(original_text: str, fallback_name: str) -> str:
+    if not original_text:
+        return f"🎬 **{fallback_name}**"
+    
+    # Remove URLs (http, https, t.me, www, etc.)
+    text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', '', original_text)
+    
+    # Remove extra spaces and newlines, keep clean text
+    cleaned = " ".join(text_without_links.split()).strip()
+    
+    if not cleaned:
+        cleaned = fallback_name
+        
+    return f"🎬 **{cleaned}**"
+
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+    # Background Worker to process queued files one by one with a delay
+    async def process_file_queue():
+        global is_processing_queue
+        is_processing_queue = True
+        while not file_queue.empty():
+            item = await file_queue.get()
+            message = item["message"]
+            status_msg = item["status_msg"]
+            
+            try:
+                fallback = message.document.file_name if message.document else (message.video.file_name if message.video and message.video.file_name else "Movie File")
+                raw_caption = message.caption or fallback
+                final_caption = clean_caption(raw_caption, fallback)
+                
+                await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
+                
+                remaining = file_queue.qsize()
+                if remaining > 0:
+                    await status_msg.edit_text(f"✅ Saved! Waiting 15 seconds before saving next file... ({remaining} files left in queue)")
+                    await asyncio.sleep(15)  # Delay between each file save
+                else:
+                    await status_msg.edit_text("✨ **All files successfully saved to channel with clean names!**")
+            except Exception as e:
+                await status_msg.edit_text(f"❌ Failed to save a file: `{str(e)}`")
+                print(f"Queue Processing Error: {e}")
+            
+            file_queue.task_done()
+        is_processing_queue = False
 
     # 1. Start Command (/start)
     @main_bot.on_message(filters.command("start") & filters.private)
@@ -96,7 +144,21 @@ async def main():
             reply_markup=keyboard
         )
 
-    # 2. Admin Command: /add [Movie Name] (With 60 seconds delay between each movie)
+    # 2. Direct File Receiver Handler for Admin (Queue Method for Multiple Files)
+    @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_ID))
+    async def handle_direct_file(client: Client, message: Message):
+        global is_processing_queue
+        try:
+            status_msg = await message.reply_text("📥 **File added to queue for processing...**")
+            await file_queue.put({"message": message, "status_msg": status_msg})
+            
+            if not is_processing_queue:
+                asyncio.create_task(process_file_queue())
+        except Exception as e:
+            await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
+            print(f"Direct File Queue Error: {e}")
+
+    # 3. Admin Command: /add [Movie Name] (With 60s delay and link removal)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         global ADD_ENABLED
@@ -159,8 +221,12 @@ async def main():
                     file_added = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
                         if file_msg.id > start_msg.id and (file_msg.document or file_msg.video):
-                            file_name = file_msg.caption or (file_msg.document.file_name if file_msg.document else movie)
-                            await file_msg.copy(chat_id=MY_CHANNEL, caption=f"🎬 **{file_name}**")
+                            fallback = file_msg.document.file_name if file_msg.document else movie
+                            raw_caption = file_msg.caption or fallback
+                            
+                            final_caption = clean_caption(raw_caption, movie)
+                            
+                            await file_msg.copy(chat_id=MY_CHANNEL, caption=final_caption)
                             success_count += 1
                             file_added = True
                             break
@@ -190,7 +256,7 @@ async def main():
             f"❌ Failed / Not Found: `{failed_count}`"
         )
 
-    # 3. User Search Handler
+    # 4. User Search Handler
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
         if message.outgoing or message.from_user.is_bot:
@@ -235,7 +301,7 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
-    # 4. Callback Query Handler
+    # 5. Callback Query Handler
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
         global ADD_ENABLED
