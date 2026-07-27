@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import math
 from threading import Thread
 from flask import Flask
 from hydrogram import Client, filters
@@ -64,27 +65,66 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Remove Links and Clean Caption to Keep Only File Name
+# Helper Function: Remove Links, Usernames (@), and Clean Caption
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
         return f"🎬 **{fallback_name}**"
     
-    # Remove URLs (http, https, t.me, www, etc.)
+    # 1. Remove URLs (http, https, t.me, www, etc.)
     text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', '', original_text)
     
-    # Remove extra spaces and newlines, keep clean text
-    cleaned = " ".join(text_without_links.split()).strip()
+    # 2. Remove Telegram Usernames (e.g., @username, @MoviesChannel)
+    text_without_usernames = re.sub(r'@\w+', '', text_without_links)
+    
+    # 3. Remove extra spaces and newlines, keep clean text
+    cleaned = " ".join(text_without_usernames.split()).strip()
     
     if not cleaned:
         cleaned = fallback_name
         
     return f"🎬 **{cleaned}**"
 
+# Helper Function to Generate Pagination Markup for Search Results
+def get_search_markup(results, query_text, page=1, per_page=10):
+    total_results = len(results)
+    total_pages = math.ceil(total_results / per_page)
+    
+    if page < 1:
+        page = 1
+    elif page > total_pages and total_pages > 0:
+        page = total_pages
+        
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    current_page_items = results[start_idx:end_idx]
+    
+    buttons = []
+    for item in current_page_items:
+        title = item["title"]
+        if len(title) > 40:
+            title = title[:37] + "..."
+        buttons.append([InlineKeyboardButton(title, callback_data=f"get_{item['id']}")])
+        
+    # Navigation Buttons Row
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"search_{query_text}_{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 Page {page} of {total_pages}", callback_data="noop"))
+    
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"search_{query_text}_{page+1}"))
+        
+    if nav_buttons:
+        buttons.append(nav_buttons)
+        
+    return InlineKeyboardMarkup(buttons), total_pages
+
 async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-    # Background Worker to process queued files one by one with a delay
+    # Background Worker to process queued files quickly with a 0.5s gap
     async def process_file_queue():
         global is_processing_queue
         is_processing_queue = True
@@ -102,8 +142,8 @@ async def main():
                 
                 remaining = file_queue.qsize()
                 if remaining > 0:
-                    await status_msg.edit_text(f"✅ Saved! Waiting 15 seconds before saving next file... ({remaining} files left in queue)")
-                    await asyncio.sleep(15)  # Delay between each file save
+                    await status_msg.edit_text(f"⚡ Saving quickly... ({remaining} files left in queue)")
+                    await asyncio.sleep(0.5)  # Fast 0.5 seconds delay between files
                 else:
                     await status_msg.edit_text("✨ **All files successfully saved to channel with clean names!**")
             except Exception as e:
@@ -144,12 +184,12 @@ async def main():
             reply_markup=keyboard
         )
 
-    # 2. Direct File Receiver Handler for Admin (Queue Method for Multiple Files)
+    # 2. Direct File Receiver Handler for Admin (Fast Queue Method)
     @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_ID))
     async def handle_direct_file(client: Client, message: Message):
         global is_processing_queue
         try:
-            status_msg = await message.reply_text("📥 **File added to queue for processing...**")
+            status_msg = await message.reply_text("📥 **File added to queue...**")
             await file_queue.put({"message": message, "status_msg": status_msg})
             
             if not is_processing_queue:
@@ -158,7 +198,7 @@ async def main():
             await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
             print(f"Direct File Queue Error: {e}")
 
-    # 3. Admin Command: /add [Movie Name] (With 60s delay and link removal)
+    # 3. Admin Command: /add [Movie Name]
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         global ADD_ENABLED
@@ -236,7 +276,6 @@ async def main():
                 else:
                     failed_count += 1
 
-                # 60 seconds (1 minute) delay before processing the next movie
                 if index < total_movies:
                     await status_msg.edit_text(
                         f"✅ Completed: `{movie}`\n"
@@ -271,24 +310,18 @@ async def main():
         status_msg = await message.reply_text(f"🔎 Searching for `{movie_name}`...")
 
         try:
-            buttons = []
+            results = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
                 if ch_message.document or ch_message.video or ch_message.audio:
                     title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
-                    if len(title) > 40:
-                        title = title[:37] + "..."
-                    
-                    buttons.append([InlineKeyboardButton(title, callback_data=f"get_{ch_message.id}")])
-                    
-                    if len(buttons) >= 10:
-                        break
+                    results.append({"id": ch_message.id, "title": title})
 
             await status_msg.delete()
 
-            if not buttons:
+            if not results:
                 await message.reply_text(f"❌ **No files found related to '{movie_name}'.**")
             else:
-                keyboard = InlineKeyboardMarkup(buttons)
+                keyboard, total_pages = get_search_markup(results, movie_name, page=1)
                 await message.reply_text(
                     f"🎬 **Found files for '{movie_name}':**\n\n👇 Click on your preferred file below:",
                     reply_markup=keyboard
@@ -330,6 +363,38 @@ async def main():
 
         if data == "noop":
             await callback_query.answer()
+            return
+
+        # Pagination Handler for Search Results
+        if data.startswith("search_"):
+            parts = data.split("_")
+            # Format: search_{query}_{page} -> since query might contain spaces or underscores, let's extract carefully
+            # Actually, to make it robust, let's parse:
+            page_str = parts[-1]
+            page = int(page_str)
+            # The middle part is the movie name (query)
+            query_text = "_".join(parts[1:-1])
+
+            try:
+                results = []
+                async for ch_message in userbot.search_messages(MY_CHANNEL, query=query_text):
+                    if ch_message.document or ch_message.video or ch_message.audio:
+                        title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
+                        results.append({"id": ch_message.id, "title": title})
+
+                if not results:
+                    await callback_query.answer("❌ No files found!", show_alert=True)
+                    return
+
+                keyboard, total_pages = get_search_markup(results, query_text, page=page)
+                await callback_query.message.edit_text(
+                    f"🎬 **Found files for '{query_text}':**\n\n👇 Click on your preferred file below:",
+                    reply_markup=keyboard
+                )
+                await callback_query.answer()
+            except Exception as e:
+                print(f"Pagination Error: {e}")
+                await callback_query.answer("❌ Error loading page!", show_alert=True)
             return
 
         if data.startswith("get_"):
