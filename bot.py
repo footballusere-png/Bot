@@ -20,7 +20,7 @@ MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
+UPDATE_CHANNEL_LINK = "https://t.me/moviestore_imdb_updates"
 
 # Admin Configuration
 ADMIN_ID = 7312906293
