@@ -13,8 +13,8 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-TARGET_BOT = "@DPCBackup_Files_01_Bot"  # ബാക്കപ്പ് ബോട്ട്
-MY_CHANNEL = -1004296254082             # ഫയലുകൾ സേവ് ആകുന്ന നിങ്ങളുടെ ചാനൽ
+TARGET_BOT = "@DPCBackup_Files_01_Bot"  # Backup bot
+MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
@@ -68,16 +68,16 @@ async def main():
         save_user(message.from_user.id)
         
         welcome_text = (
-            f"👋 **ഹലോ {message.from_user.mention},**\n\n"
-            "🎬 **Movie Finder Bot**-ലേക്ക് സ്വാഗതം!\n\n"
-            "നിങ്ങൾക്ക് ആവശ്യമായ ഏത് സിനിമയുടെയും പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക."
+            f"👋 **Hello {message.from_user.mention},**\n\n"
+            "🎬 **Welcome to Movie Finder Bot!**\n\n"
+            "Just type and send the name of the movie you are looking for."
         )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
+            [InlineKeyboardButton("📢 Update Channel", url=UPDATE_CHANNEL_LINK)]
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
-    # 2. Admin Command: /add [Movie Name]
+    # 2. Admin Command: /add [Movie Name] (With 30 seconds delay between each movie)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         lines = message.text.split("\n")
@@ -94,18 +94,23 @@ async def main():
                     movies_to_process.append(cleaned)
 
         if not movies_to_process:
-            await message.reply_text("⚠️ **ഉപയോഗിക്കേണ്ട രീതി:** `/add athiradi` അല്ലെങ്കിൽ ഒന്നിധികം പേരുകൾ വരിയായി നൽകുക.")
+            await message.reply_text("⚠️ **Usage:** `/add athiradi` or send multiple names line by line.")
             return
 
-        status_msg = await message.reply_text("⏳ **ഫയൽ തിരയുന്ന പ്രക്രിയ ആരംഭിച്ചു...**")
+        status_msg = await message.reply_text("⏳ **Indexing process started...**")
         
         success_count = 0
         failed_count = 0
+        total_movies = len(movies_to_process)
 
-        for movie in movies_to_process:
+        for index, movie in enumerate(movies_to_process, start=1):
             try:
-                await status_msg.edit_text(f"🔍 സെർച്ച് ചെയ്യുന്നു: `{movie}`")
+                await status_msg.edit_text(
+                    f"🔍 **Processing [{index}/{total_movies}]:** `{movie}`\n"
+                    "⏳ *Please wait, searching and adding to channel...*"
+                )
                 
+                # Step 1: Send movie name to TARGET_BOT
                 sent_msg = await userbot.send_message(TARGET_BOT, movie)
                 await asyncio.sleep(6)
 
@@ -119,6 +124,7 @@ async def main():
                     if first_link:
                         break
 
+                # Step 2: Fetch and save file to channel if link found
                 if first_link and "start=" in first_link:
                     param = first_link.split("start=")[1].split("?")[0]
                     start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
@@ -127,7 +133,6 @@ async def main():
                     file_added = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
                         if file_msg.id > start_msg.id and (file_msg.document or file_msg.video):
-                            # ഫയലിന്റെ യഥാർത്ഥ കാപ്ഷൻ അല്ലെങ്കിൽ ഫയൽ നെയിം എടുക്കുന്നു
                             file_name = file_msg.caption or (file_msg.document.file_name if file_msg.document else movie)
                             await file_msg.copy(chat_id=MY_CHANNEL, caption=f"🎬 **{file_name}**")
                             success_count += 1
@@ -139,17 +144,27 @@ async def main():
                 else:
                     failed_count += 1
 
-                await asyncio.sleep(2)
-            except Exception:
+                # 30 seconds delay before processing the next movie (if more movies are left)
+                if index < total_movies:
+                    await status_msg.edit_text(
+                        f"✅ Completed: `{movie}`\n"
+                        f"⏳ **Waiting 30 seconds before searching the next movie...** [{index}/{total_movies}]"
+                    )
+                    await asyncio.sleep(30)
+                else:
+                    await asyncio.sleep(2)
+
+            except Exception as e:
                 failed_count += 1
+                print(f"Error adding {movie}: {e}")
 
         await status_msg.edit_text(
-            f"✨ **പ്രക്രിയ വിജയകരമായി പൂർത്തിയായി!**\n\n"
-            f"📥 ചാനലിലേക്ക് സേവ് ചെയ്തവ: `{success_count}`\n"
-            f"❌ കണ്ടെത്താനാവാത്തവ: `{failed_count}`"
+            f"✨ **Process Completed Successfully!**\n\n"
+            f"📥 Successfully Added: `{success_count}`\n"
+            f"❌ Failed / Not Found: `{failed_count}`"
         )
 
-    # 3. User Search Handler (ചാനലിൽ നിന്ന് മാച്ച് ആവുന്നവ ലിസ്റ്റ് ബട്ടണുകളായി കാണിക്കുന്നു)
+    # 3. User Search Handler (Shows matching files as inline buttons)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
         if message.outgoing or message.from_user.is_bot:
@@ -161,32 +176,29 @@ async def main():
         if "t.me/" in movie_name or len(movie_name) < 2:
             return
 
-        status_msg = await message.reply_text(f"🔎 `{movie_name}` സെർച്ച് ചെയ്യുന്നു...")
+        status_msg = await message.reply_text(f"🔎 Searching for `{movie_name}`...")
 
         try:
             buttons = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
                 if ch_message.document or ch_message.video or ch_message.audio:
-                    # ഫയലിന്റെ പേര് അല്ലെങ്കിൽ കാപ്ഷൻ എടുക്കുന്നു
                     title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
-                    # ബട്ടൺ വലുപ്പം കുറക്കാൻ പേര് ചെറുതാക്കാം
                     if len(title) > 40:
                         title = title[:37] + "..."
                     
-                    # കോൾബാക്ക് ഡാറ്റയിൽ മെസ്സേജ് ഐഡിയും സ്റ്റോർ ചെയ്യുന്നു (Format: file_MessageID)
                     buttons.append([InlineKeyboardButton(title, callback_data=f"get_{ch_message.id}")])
                     
-                    if len(buttons) >= 10:  # പരമാവധി 10 ഫീലുകൾ മാത്രം ബട്ടണായി കാണിക്കാൻ
+                    if len(buttons) >= 10:  # Max 10 buttons limit
                         break
 
             await status_msg.delete()
 
             if not buttons:
-                await message.reply_text(f"❌ **'{movie_name}'** സംബന്ധമായ ഫയലുകൾ ഒന്നും കണ്ടെത്താനായില്ല.")
+                await message.reply_text(f"❌ **No files found related to '{movie_name}'.**")
             else:
                 keyboard = InlineKeyboardMarkup(buttons)
                 await message.reply_text(
-                    f"🎬 **'{movie_name}'** എന്ന പേരിൽ താഴെ കാണുന്ന ഫയലുകൾ ലഭ്യമBാണ്:\n\n👇 ആവശ്യമായ ഫയലിൽ ക്ലിക്ക് ചെയ്യുക:",
+                    f"🎬 **Found files for '{movie_name}':**\n\n👇 Click on your preferred file below:",
                     reply_markup=keyboard
                 )
 
@@ -197,7 +209,7 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
-    # 4. Callback Query Handler (ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ വർക്ക് ചെയ്യുന്നത്)
+    # 4. Callback Query Handler (Handles button clicks and force join verification)
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
         data = callback_query.data
@@ -210,19 +222,19 @@ async def main():
             is_joined = await check_force_sub(client, user_id)
             if not is_joined:
                 join_keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📢 ചാനലിൽ ജോയിൻ ചെയ്യുക", url=UPDATE_CHANNEL_LINK)],
-                    [InlineKeyboardButton("🔄 ഞാൻ ജോയിൻ ചെയ്തു", callback_data=data)]
+                    [InlineKeyboardButton("📢 Join Channel", url=UPDATE_CHANNEL_LINK)],
+                    [InlineKeyboardButton("🔄 I Have Joined", callback_data=data)]
                 ])
-                await callback_query.answer("⚠️ ആദ്യം ചാനലിൽ ജോയിൻ ചെയ്യുക!", show_alert=True)
+                await callback_query.answer("⚠️ Please join our update channel first!", show_alert=True)
                 await callback_query.message.edit_text(
-                    "⚠️ **ഫയലുകൾ ലഭിക്കുന്നതിനായി ആദ്യം ഞങ്ങളുടെ ചാനലിൽ ജോയിൻ ചെയ്യുക!**\n\n"
-                    "👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ജോയിൻ ചെയ്ത ശേഷം **'ഞാൻ ജോയിൻ ചെയ്തു'** ബട്ടൺ അമർത്തുക.",
+                    "⚠️ **You must join our update channel to get files!**\n\n"
+                    "👇 Click the button below to join, then click **'I Have Joined'**.",
                     reply_markup=join_keyboard
                 )
                 return
 
-            # ജോയിൻ ചെയ്തിട്ടുണ്ടെങ്കിൽ ഫയൽ സെന്റ് ചെയ്യുക
-            await callback_query.answer("📥 ഫയൽ അയച്ചുകൊണ്ടിരിക്കുന്നു...", show_alert=False)
+            # If joined, send the file
+            await callback_query.answer("📥 Sending file...", show_alert=False)
             try:
                 await main_bot.copy_message(
                     chat_id=callback_query.message.chat.id,
@@ -231,7 +243,7 @@ async def main():
                 )
                 await callback_query.message.delete()
             except Exception as e:
-                await callback_query.message.reply_text("❌ ഫയൽ സെന്റ് ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു. ദയവായി വീണ്ടും ശ്രമിക്കുക.")
+                await callback_query.message.reply_text("❌ Failed to send file. Please try again later.")
                 print(f"Copy Error: {e}")
 
     # Start Flask in a separate thread so it binds to Render's port
@@ -239,7 +251,7 @@ async def main():
 
     await userbot.start()
     await main_bot.start()
-    print("🚀 Movie Bot & Web Server വിജയകരമായി റൺ ആയി!")
+    print("🚀 Movie Bot & Web Server successfully running!")
 
     await asyncio.Event().wait()
 
