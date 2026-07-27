@@ -18,7 +18,7 @@ MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/moviestore_imdb_updates"
+UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
 # Admin Configuration
 ADMIN_ID = 7312906293
@@ -96,7 +96,7 @@ async def main():
             reply_markup=keyboard
         )
 
-    # 2. Admin Command: /add [Movie Name] (With 30s delay and ON/OFF check)
+    # 2. Admin Command: /add [Movie Name] (With 60 seconds delay between each movie)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         global ADD_ENABLED
@@ -170,12 +170,13 @@ async def main():
                 else:
                     failed_count += 1
 
+                # 60 seconds (1 minute) delay before processing the next movie
                 if index < total_movies:
                     await status_msg.edit_text(
                         f"✅ Completed: `{movie}`\n"
-                        f"⏳ **Waiting 30 seconds before searching the next movie...** [{index}/{total_movies}]"
+                        f"⏳ **Waiting 60 seconds before searching the next movie...** [{index}/{total_movies}]"
                     )
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(60)
                 else:
                     await asyncio.sleep(2)
 
@@ -234,14 +235,13 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
-    # 4. Callback Query Handler (Handles toggle and file delivery)
+    # 4. Callback Query Handler
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
         global ADD_ENABLED
         data = callback_query.data
         user_id = callback_query.from_user.id
 
-        # Admin Toggle Handler
         if data == "toggle_add":
             if user_id != ADMIN_ID:
                 await callback_query.answer("⚠️ You are not authorized!", show_alert=True)
