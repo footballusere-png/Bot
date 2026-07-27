@@ -1,7 +1,9 @@
 import asyncio
 import os
+from threading import Thread
+from flask import Flask
 from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from hydrogram.errors import UserNotParticipant
 
 # ------------ CONFIGURATION ------------
@@ -22,6 +24,17 @@ UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 ADMIN_ID = 7312906293
 USER_DB_FILE = "users.txt"
 # ----------------------------------------
+
+# Dummy Flask App to satisfy Render Port Binding requirement
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 # Helper Function: Save New Users
 def save_user(user_id: int):
@@ -54,32 +67,17 @@ async def main():
     async def start_cmd(client: Client, message: Message):
         save_user(message.from_user.id)
         
-        is_joined = await check_force_sub(client, message.from_user.id)
-        if not is_joined:
-            join_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 ചാനലിൽ ജോയിൻ ചെയ്യുക", url=UPDATE_CHANNEL_LINK)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{(await client.get_me()).username}?start=start")]
-            ])
-            await message.reply_text(
-                f"👋 **ഹലോ {message.from_user.mention},**\n\n"
-                "⚠️ **സിനിമകൾ ഡൗൺലോഡ് ചെയ്യുന്നതിനായി ആദ്യം ഞങ്ങളുടെ അപ്‌ഡേറ്റ് ചാനലിൽ സബ്‌സ്‌ക്രൈബ് ചെയ്യേണ്ടതുണ്ട്!**\n\n"
-                "👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ചാനലിൽ ജോയിൻ ചെയ്ത ശേഷം **Try Again** അമർത്തുക.",
-                reply_markup=join_keyboard
-            )
-            return
-
         welcome_text = (
             f"👋 **ഹലോ {message.from_user.mention},**\n\n"
             "🎬 **Movie Finder Bot**-ലേക്ക് സ്വാഗതം!\n\n"
-            "നിങ്ങൾക്ക് ആവശ്യമായ ഏത് സിനിമയുടെയും പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക.\n\n"
-            "✨ *ഉദാഹരണത്തിന്:* `Naran`"
+            "നിങ്ങൾക്ക് ആവശ്യമായ ഏത് സിനിമയുടെയും പേര് കൃത്യമായി താഴെ ടൈപ്പ് ചെയ്ത് അയക്കുക."
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 അപ്‌ഡേറ്റ് ചാനൽ", url=UPDATE_CHANNEL_LINK)]
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
-    # 2. Admin Command: /add [Movie Name] (ബോട്ടിൽ പോയി സെർച്ച് ചെയ്ത് ചാനലിൽ ആഡ് ചെയ്യുന്നു)
+    # 2. Admin Command: /add [Movie Name]
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
         lines = message.text.split("\n")
@@ -108,7 +106,6 @@ async def main():
             try:
                 await status_msg.edit_text(f"🔍 സെർച്ച് ചെയ്യുന്നു: `{movie}`")
                 
-                # TARGET_BOT-ലേക്ക് സിനിമയുടെ പേര് അയക്കുന്നു
                 sent_msg = await userbot.send_message(TARGET_BOT, movie)
                 await asyncio.sleep(6)
 
@@ -130,7 +127,9 @@ async def main():
                     file_added = False
                     async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
                         if file_msg.id > start_msg.id and (file_msg.document or file_msg.video):
-                            await file_msg.copy(chat_id=MY_CHANNEL, caption=f"🎬 **{movie}**")
+                            # ഫയലിന്റെ യഥാർത്ഥ കാപ്ഷൻ അല്ലെങ്കിൽ ഫയൽ നെയിം എടുക്കുന്നു
+                            file_name = file_msg.caption or (file_msg.document.file_name if file_msg.document else movie)
+                            await file_msg.copy(chat_id=MY_CHANNEL, caption=f"🎬 **{file_name}**")
                             success_count += 1
                             file_added = True
                             break
@@ -150,10 +149,9 @@ async def main():
             f"❌ കണ്ടെത്താനാവാത്തവ: `{failed_count}`"
         )
 
-    # 3. User Search Handler (യൂസർ ചോദിക്കുമ്പോൾ ചാനലിൽ നിന്ന് എടുത്ത് നൽകുന്നു - ലൂപ്പ് പൂർണ്ണമായി തടഞ്ഞു)
+    # 3. User Search Handler (ചാനലിൽ നിന്ന് മാച്ച് ആവുന്നവ ലിസ്റ്റ് ബട്ടണുകളായി കാണിക്കുന്നു)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
-        # ബോട്ട് അയക്കുന്ന സ്വന്തം മെസ്സേജുകളെ പൂർണ്ണമായി അവഗണിക്കുന്നു (ലൂപ്പ് തടയാൻ)
         if message.outgoing or message.from_user.is_bot:
             return
 
@@ -163,39 +161,34 @@ async def main():
         if "t.me/" in movie_name or len(movie_name) < 2:
             return
 
-        is_joined = await check_force_sub(client, message.from_user.id)
-        if not is_joined:
-            join_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 ചാനലിൽ ജോയിൻ ചെയ്യുക", url=UPDATE_CHANNEL_LINK)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{(await client.get_me()).username}?start=start")]
-            ])
-            await message.reply_text(
-                "⚠️ **ഫയലുകൾ ലഭിക്കുന്നതിനായി ആദ്യം ഞങ്ങളുടെ ചാനലിൽ ജോയിൻ ചെയ്യുക!**\n\n"
-                "👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ജോയിൻ ചെയ്ത ശേഷം വീണ്ടും സിനിമ പേര് സെർച്ച് ചെയ്യുക.",
-                reply_markup=join_keyboard
-            )
-            return
-
         status_msg = await message.reply_text(f"🔎 `{movie_name}` സെർച്ച് ചെയ്യുന്നു...")
 
         try:
-            file_found = False
+            buttons = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
                 if ch_message.document or ch_message.video or ch_message.audio:
-                    # ഫയൽ കണ്ടെത്തിയാൽ യൂസർക്ക് അയച്ചു കൊടുക്കുന്നു
-                    await main_bot.copy_message(
-                        chat_id=message.chat.id,
-                        from_chat_id=MY_CHANNEL,
-                        message_id=ch_message.id
-                    )
-                    file_found = True
-                    break
+                    # ഫയലിന്റെ പേര് അല്ലെങ്കിൽ കാപ്ഷൻ എടുക്കുന്നു
+                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
+                    # ബട്ടൺ വലുപ്പം കുറക്കാൻ പേര് ചെറുതാക്കാം
+                    if len(title) > 40:
+                        title = title[:37] + "..."
+                    
+                    # കോൾബാക്ക് ഡാറ്റയിൽ മെസ്സേജ് ഐഡിയും സ്റ്റോർ ചെയ്യുന്നു (Format: file_MessageID)
+                    buttons.append([InlineKeyboardButton(title, callback_data=f"get_{ch_message.id}")])
+                    
+                    if len(buttons) >= 10:  # പരമാവധി 10 ഫീലുകൾ മാത്രം ബട്ടണായി കാണിക്കാൻ
+                        break
 
-            # സ്റ്റാറ്റസ് മെസ്സേജുകൾ ഒഴിവാക്കാൻ
             await status_msg.delete()
 
-            if not file_found:
+            if not buttons:
                 await message.reply_text(f"❌ **'{movie_name}'** സംബന്ധമായ ഫയലുകൾ ഒന്നും കണ്ടെത്താനായില്ല.")
+            else:
+                keyboard = InlineKeyboardMarkup(buttons)
+                await message.reply_text(
+                    f"🎬 **'{movie_name}'** എന്ന പേരിൽ താഴെ കാണുന്ന ഫയലുകൾ ലഭ്യമBാണ്:\n\n👇 ആവശ്യമായ ഫയലിൽ ക്ലിക്ക് ചെയ്യുക:",
+                    reply_markup=keyboard
+                )
 
         except Exception as e:
             try:
@@ -204,9 +197,49 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
+    # 4. Callback Query Handler (ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ വർക്ക് ചെയ്യുന്നത്)
+    @main_bot.on_callback_query()
+    async def callback_handler(client: Client, callback_query: CallbackQuery):
+        data = callback_query.data
+        user_id = callback_query.from_user.id
+
+        if data.startswith("get_"):
+            file_msg_id = int(data.split("_")[1])
+
+            # Force Join Check
+            is_joined = await check_force_sub(client, user_id)
+            if not is_joined:
+                join_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📢 ചാനലിൽ ജോയിൻ ചെയ്യുക", url=UPDATE_CHANNEL_LINK)],
+                    [InlineKeyboardButton("🔄 ഞാൻ ജോയിൻ ചെയ്തു", callback_data=data)]
+                ])
+                await callback_query.answer("⚠️ ആദ്യം ചാനലിൽ ജോയിൻ ചെയ്യുക!", show_alert=True)
+                await callback_query.message.edit_text(
+                    "⚠️ **ഫയലുകൾ ലഭിക്കുന്നതിനായി ആദ്യം ഞങ്ങളുടെ ചാനലിൽ ജോയിൻ ചെയ്യുക!**\n\n"
+                    "👇 താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്ത് ജോയിൻ ചെയ്ത ശേഷം **'ഞാൻ ജോയിൻ ചെയ്തു'** ബട്ടൺ അമർത്തുക.",
+                    reply_markup=join_keyboard
+                )
+                return
+
+            # ജോയിൻ ചെയ്തിട്ടുണ്ടെങ്കിൽ ഫയൽ സെന്റ് ചെയ്യുക
+            await callback_query.answer("📥 ഫയൽ അയച്ചുകൊണ്ടിരിക്കുന്നു...", show_alert=False)
+            try:
+                await main_bot.copy_message(
+                    chat_id=callback_query.message.chat.id,
+                    from_chat_id=MY_CHANNEL,
+                    message_id=file_msg_id
+                )
+                await callback_query.message.delete()
+            except Exception as e:
+                await callback_query.message.reply_text("❌ ഫയൽ സെന്റ് ചെയ്യുന്നതിൽ തടസ്സം നേരിട്ടു. ദയവായി വീണ്ടും ശ്രമിക്കുക.")
+                print(f"Copy Error: {e}")
+
+    # Start Flask in a separate thread so it binds to Render's port
+    Thread(target=run_flask, daemon=True).start()
+
     await userbot.start()
     await main_bot.start()
-    print("🚀 Professional Movie Bot വിജയകരമായി റൺ ആയി!")
+    print("🚀 Movie Bot & Web Server വിജയകരമായി റൺ ആയി!")
 
     await asyncio.Event().wait()
 
