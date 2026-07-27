@@ -23,6 +23,9 @@ UPDATE_CHANNEL_LINK = "https://t.me/moviestore_imdb_updates"
 # Admin Configuration
 ADMIN_ID = 7312906293
 USER_DB_FILE = "users.txt"
+
+# Global variable to control Add feature status
+ADD_ENABLED = True
 # ----------------------------------------
 
 # Dummy Flask App to satisfy Render Port Binding requirement
@@ -77,9 +80,30 @@ async def main():
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
-    # 2. Admin Command: /add [Movie Name] (With 30 seconds delay between each movie)
+    # Admin Settings Panel Command (/panel or /admin)
+    @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_ID))
+    async def admin_panel(client: Client, message: Message):
+        global ADD_ENABLED
+        status_text = "🟢 Enabled" if ADD_ENABLED else "🔴 Disabled"
+        toggle_btn_text = "Turn Off Add 🔴" if ADD_ENABLED else "Turn On Add 🟢"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
+            [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
+        ])
+        await message.reply_text(
+            "⚙️ **Admin Control Panel**\n\nManage your bot settings below:",
+            reply_markup=keyboard
+        )
+
+    # 2. Admin Command: /add [Movie Name] (With 30s delay and ON/OFF check)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
     async def add_movie_cmd(client: Client, message: Message):
+        global ADD_ENABLED
+        if not ADD_ENABLED:
+            await message.reply_text("❌ **The Add feature is currently turned OFF by the admin.**")
+            return
+
         lines = message.text.split("\n")
         movies_to_process = []
         
@@ -104,13 +128,16 @@ async def main():
         total_movies = len(movies_to_process)
 
         for index, movie in enumerate(movies_to_process, start=1):
+            if not ADD_ENABLED:
+                await status_msg.edit_text("⚠️ **Process aborted! The Add feature was turned off.**")
+                return
+
             try:
                 await status_msg.edit_text(
                     f"🔍 **Processing [{index}/{total_movies}]:** `{movie}`\n"
                     "⏳ *Please wait, searching and adding to channel...*"
                 )
                 
-                # Step 1: Send movie name to TARGET_BOT
                 sent_msg = await userbot.send_message(TARGET_BOT, movie)
                 await asyncio.sleep(6)
 
@@ -124,7 +151,6 @@ async def main():
                     if first_link:
                         break
 
-                # Step 2: Fetch and save file to channel if link found
                 if first_link and "start=" in first_link:
                     param = first_link.split("start=")[1].split("?")[0]
                     start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
@@ -144,7 +170,6 @@ async def main():
                 else:
                     failed_count += 1
 
-                # 30 seconds delay before processing the next movie (if more movies are left)
                 if index < total_movies:
                     await status_msg.edit_text(
                         f"✅ Completed: `{movie}`\n"
@@ -164,7 +189,7 @@ async def main():
             f"❌ Failed / Not Found: `{failed_count}`"
         )
 
-    # 3. User Search Handler (Shows matching files as inline buttons)
+    # 3. User Search Handler
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
         if message.outgoing or message.from_user.is_bot:
@@ -188,7 +213,7 @@ async def main():
                     
                     buttons.append([InlineKeyboardButton(title, callback_data=f"get_{ch_message.id}")])
                     
-                    if len(buttons) >= 10:  # Max 10 buttons limit
+                    if len(buttons) >= 10:
                         break
 
             await status_msg.delete()
@@ -209,16 +234,41 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
-    # 4. Callback Query Handler (Handles button clicks and force join verification)
+    # 4. Callback Query Handler (Handles toggle and file delivery)
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
+        global ADD_ENABLED
         data = callback_query.data
         user_id = callback_query.from_user.id
+
+        # Admin Toggle Handler
+        if data == "toggle_add":
+            if user_id != ADMIN_ID:
+                await callback_query.answer("⚠️ You are not authorized!", show_alert=True)
+                return
+            
+            ADD_ENABLED = not ADD_ENABLED
+            status_text = "🟢 Enabled" if ADD_ENABLED else "🔴 Disabled"
+            toggle_btn_text = "Turn Off Add 🔴" if ADD_ENABLED else "Turn On Add 🟢"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
+                [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
+            ])
+            await callback_query.message.edit_text(
+                "⚙️ **Admin Control Panel**\n\nManage your bot settings below:",
+                reply_markup=keyboard
+            )
+            await callback_query.answer(f"Add feature is now {'Enabled' if ADD_ENABLED else 'Disabled'}!", show_alert=False)
+            return
+
+        if data == "noop":
+            await callback_query.answer()
+            return
 
         if data.startswith("get_"):
             file_msg_id = int(data.split("_")[1])
 
-            # Force Join Check
             is_joined = await check_force_sub(client, user_id)
             if not is_joined:
                 join_keyboard = InlineKeyboardMarkup([
@@ -233,7 +283,6 @@ async def main():
                 )
                 return
 
-            # If joined, send the file
             await callback_query.answer("📥 Sending file...", show_alert=False)
             try:
                 await main_bot.copy_message(
