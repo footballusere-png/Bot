@@ -153,7 +153,7 @@ async def main():
             file_queue.task_done()
         is_processing_queue = False
 
-    # 1. Start Command (/start)
+    # 1. Start Command (/start) with Menu Buttons
     @main_bot.on_message(filters.command("start") & filters.private)
     async def start_cmd(client: Client, message: Message):
         save_user(message.from_user.id)
@@ -164,9 +164,28 @@ async def main():
             "Just type and send the name of the movie you are looking for (Minimum 4 letters)."
         )
         keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📂 Available Files", callback_data="available_files_btn")],
             [InlineKeyboardButton("📢 Update Channel", url=UPDATE_CHANNEL_LINK)]
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
+
+    # Available Files Command (/available_files) for all users
+    @main_bot.on_message(filters.command("available_files") & filters.private)
+    async def available_files_cmd(client: Client, message: Message):
+        status_msg = await message.reply_text("📊 **Calculating available files in database...**")
+        try:
+            count = 0
+            async for _ in userbot.search_messages(MY_CHANNEL, query=""):
+                count += 1
+            
+            await status_msg.edit_text(
+                f"📁 **Database Status:**\n\n"
+                f"✅ Total Available Files: `~{count}`\n\n"
+                f"💡 *Type any movie name (minimum 4 letters) to search and download!*"
+            )
+        except Exception as e:
+            await status_msg.edit_text("❌ Failed to fetch file count. Please try again later.")
+            print(f"Available Files Error: {e}")
 
     # Admin Settings Panel Command (/panel or /admin)
     @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_ID))
@@ -368,6 +387,24 @@ async def main():
 
         if data == "noop":
             await callback_query.answer()
+            return
+
+        # Callback for Available Files Button in Start Menu
+        if data == "available_files_btn":
+            await callback_query.answer("📊 Fetching file count...", show_alert=False)
+            try:
+                count = 0
+                async for _ in userbot.search_messages(MY_CHANNEL, query=""):
+                    count += 1
+                
+                await callback_query.message.reply_text(
+                    f"📁 **Database Status:**\n\n"
+                    f"✅ Total Available Files: `~{count}`\n\n"
+                    f"💡 *Type any movie name (minimum 4 letters) to search and download!*"
+                )
+            except Exception as e:
+                await callback_query.message.reply_text("❌ Failed to fetch file count. Please try again later.")
+                print(f"Available Files Callback Error: {e}")
             return
 
         # Pagination Handler for Search Results
