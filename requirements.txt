@@ -1,2 +1,6 @@
 hydrogram
 tgcrypto
+aiosqlite
+pyaes
+pysocks
+flask
