@@ -84,7 +84,7 @@ def clean_caption(original_text: str, fallback_name: str) -> str:
         
     return f"🎬 **{cleaned}**"
 
-# Helper Function to Generate Pagination Markup for Search Results
+# Helper Function to Generate Pagination Markup for Search Results (10 files per page)
 def get_search_markup(results, query_text, page=1, per_page=10):
     total_results = len(results)
     total_pages = math.ceil(total_results / per_page)
@@ -124,7 +124,7 @@ async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-    # Background Worker to process queued files quickly with a 0.5s gap
+    # Background Worker to process queued files safely with a 3s gap to avoid FloodWait
     async def process_file_queue():
         global is_processing_queue
         is_processing_queue = True
@@ -142,8 +142,8 @@ async def main():
                 
                 remaining = file_queue.qsize()
                 if remaining > 0:
-                    await status_msg.edit_text(f"⚡ Saving quickly... ({remaining} files left in queue)")
-                    await asyncio.sleep(0.5)  # Fast 0.5 seconds delay between files
+                    await status_msg.edit_text(f"⚡ Saving safely... ({remaining} files left in queue)")
+                    await asyncio.sleep(3)  # Safe 3 seconds delay between files to prevent FloodWait
                 else:
                     await status_msg.edit_text("✨ **All files successfully saved to channel with clean names!**")
             except Exception as e:
@@ -161,7 +161,7 @@ async def main():
         welcome_text = (
             f"👋 **Hello {message.from_user.mention},**\n\n"
             "🎬 **Welcome to Movie Finder Bot!**\n\n"
-            "Just type and send the name of the movie you are looking for."
+            "Just type and send the name of the movie you are looking for (Minimum 4 letters)."
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Update Channel", url=UPDATE_CHANNEL_LINK)]
@@ -295,7 +295,7 @@ async def main():
             f"❌ Failed / Not Found: `{failed_count}`"
         )
 
-    # 4. User Search Handler
+    # 4. User Search Handler (Requires minimum 4 letters and lists all matching files)
     @main_bot.on_message(filters.text & filters.private & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
         if message.outgoing or message.from_user.is_bot:
@@ -304,7 +304,12 @@ async def main():
         save_user(message.from_user.id)
         movie_name = message.text.strip()
         
-        if "t.me/" in movie_name or len(movie_name) < 2:
+        if "t.me/" in movie_name:
+            return
+
+        # Check if movie name has at least 4 characters
+        if len(movie_name) < 4:
+            await message.reply_text("⚠️ **Please type at least 4 characters to search for a movie!**")
             return
 
         status_msg = await message.reply_text(f"🔎 Searching for `{movie_name}`...")
@@ -323,7 +328,7 @@ async def main():
             else:
                 keyboard, total_pages = get_search_markup(results, movie_name, page=1)
                 await message.reply_text(
-                    f"🎬 **Found files for '{movie_name}':**\n\n👇 Click on your preferred file below:",
+                    f"🎬 **Found {len(results)} files for '{movie_name}':**\n\n👇 Click on your preferred file below:",
                     reply_markup=keyboard
                 )
 
@@ -368,11 +373,8 @@ async def main():
         # Pagination Handler for Search Results
         if data.startswith("search_"):
             parts = data.split("_")
-            # Format: search_{query}_{page} -> since query might contain spaces or underscores, let's extract carefully
-            # Actually, to make it robust, let's parse:
             page_str = parts[-1]
             page = int(page_str)
-            # The middle part is the movie name (query)
             query_text = "_".join(parts[1:-1])
 
             try:
@@ -388,7 +390,7 @@ async def main():
 
                 keyboard, total_pages = get_search_markup(results, query_text, page=page)
                 await callback_query.message.edit_text(
-                    f"🎬 **Found files for '{query_text}':**\n\n👇 Click on your preferred file below:",
+                    f"🎬 **Found {len(results)} files for '{query_text}':**\n\n👇 Click on your preferred file below:",
                     reply_markup=keyboard
                 )
                 await callback_query.answer()
@@ -421,7 +423,6 @@ async def main():
                     from_chat_id=MY_CHANNEL,
                     message_id=file_msg_id
                 )
-                await callback_query.message.delete()
             except Exception as e:
                 await callback_query.message.reply_text("❌ Failed to send file. Please try again later.")
                 print(f"Copy Error: {e}")
