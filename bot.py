@@ -6,7 +6,7 @@ from threading import Thread
 from flask import Flask
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from hydrogram.errors import UserNotParticipant
+from hydrogram.errors import UserNotParticipant, FloodWait
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -20,10 +20,11 @@ MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
+UPDATE_CHANNEL_LINK = "@movie_finder_update_channel"
 
-# Admin Configuration
-ADMIN_ID = 7312906293
+# Multiple Admins Configuration
+ADMIN_IDS = [7312906293, 7199304293]
+
 USER_DB_FILE = "users.txt"
 GROUP_DB_FILE = "groups.txt"
 
@@ -210,7 +211,7 @@ async def main():
             print(f"Available Files Error: {e}")
 
     # Admin Settings Panel Command
-    @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_ID))
+    @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_IDS))
     async def admin_panel(client: Client, message: Message):
         global ADD_ENABLED
         status_text = "🟢 Enabled" if ADD_ENABLED else "🔴 Disabled"
@@ -225,16 +226,61 @@ async def main():
             reply_markup=keyboard
         )
 
-    # 2. Direct File Receiver Handler for Admin (Queues up to 100+ files with single status message)
-    @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_ID))
+    # 5. Broadcast Command (/broadcast) for Admins to All Users and Groups
+    @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
+    async def broadcast_cmd(client: Client, message: Message):
+        if not message.reply_to_message:
+            await message.reply_text("⚠️ **Please reply to any message/photo/video to broadcast it to all users and groups!**")
+            return
+
+        status_msg = await message.reply_text("📢 **Broadcasting started...**")
+        
+        broadcast_msg = message.reply_to_message
+        success_users = 0
+        failed_users = 0
+        success_groups = 0
+        failed_groups = 0
+
+        # 1. Broadcast to Users
+        if os.path.exists(USER_DB_FILE):
+            with open(USER_DB_FILE, "r") as f:
+                users = f.read().splitlines()
+            
+            for u_id in users:
+                try:
+                    await broadcast_msg.copy(chat_id=int(u_id))
+                    success_users += 1
+                    await asyncio.sleep(0.1) # Prevent FloodWait
+                except Exception:
+                    failed_users += 1
+
+        # 2. Broadcast to Groups
+        if os.path.exists(GROUP_DB_FILE):
+            with open(GROUP_DB_FILE, "r") as gf:
+                groups = gf.read().splitlines()
+            
+            for g_id in groups:
+                try:
+                    await broadcast_msg.copy(chat_id=int(g_id))
+                    success_groups += 1
+                    await asyncio.sleep(0.1) # Prevent FloodWait
+                except Exception:
+                    failed_groups += 1
+
+        await status_msg.edit_text(
+            f"✨ **Broadcast Completed Successfully!**\n\n"
+            f"👤 **Users:** Success: `{success_users}` | Failed: `{failed_users}`\n"
+            f"👥 **Groups:** Success: `{success_groups}` | Failed: `{failed_groups}`"
+        )
+
+    # 2. Direct File Receiver Handler for Admins (Queues up to 100+ files with single status message)
+    @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_IDS))
     async def handle_direct_file(client: Client, message: Message):
         global is_processing_queue
         try:
-            # Check if status message already exists or send one
             if file_queue.empty() and not is_processing_queue:
                 status_msg = await message.reply_text("📥 **Initializing file queue...**")
             else:
-                # Find the latest status message or create a new one
                 status_msg = await message.reply_text("📥 **File added to queue...**")
 
             await file_queue.put({"message": message, "status_msg": status_msg})
@@ -246,7 +292,7 @@ async def main():
             print(f"Direct File Queue Error: {e}")
 
     # 3. Admin Command: /add [Movie Name] (Broadcasts to all saved groups)
-    @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_ID))
+    @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_IDS))
     async def add_movie_cmd(client: Client, message: Message):
         global ADD_ENABLED
         if not ADD_ENABLED:
@@ -333,7 +379,6 @@ async def main():
                                 for g_id in groups:
                                     try:
                                         grp_msg = await main_bot.send_message(int(g_id), announcement_text, reply_markup=kb)
-                                        # Auto delete group announcement after 10 mins (600s)
                                         async def del_announcement(m):
                                             await asyncio.sleep(600)
                                             try:
@@ -452,7 +497,7 @@ async def main():
         user_id = callback_query.from_user.id
 
         if data == "toggle_add":
-            if user_id != ADMIN_ID:
+            if user_id not in ADMIN_IDS:
                 await callback_query.answer("⚠️ You are not authorized!", show_alert=True)
                 return
             
