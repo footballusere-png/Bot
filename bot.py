@@ -20,7 +20,7 @@ MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "@movie_finder_update_channel"
+UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
 # Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
@@ -29,6 +29,7 @@ USER_DB_FILE = "users.txt"
 GROUP_DB_FILE = "groups.txt"
 
 # Global variables
+ADMIN_USERNAME = "@YourAdminUsername"  # Replace with admin username if needed for requests
 ADD_ENABLED = True
 file_queue = asyncio.Queue()
 is_processing_queue = False
@@ -77,19 +78,21 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Remove Links, Usernames (@), and Clean Caption
+# Helper Function: Custom Caption / Watermark Cleaner
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
-        return f"🎬 **{fallback_name}**"
+        return f"🎬 **{fallback_name}**\n\n✨ **Powered by Movie Bot**"
     
-    text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', '', original_text)
+    # Remove unwanted URLs, telegram links, and usernames to strip watermarks
+    text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', original_text)
     text_without_usernames = re.sub(r'@\w+', '', text_without_links)
     cleaned = " ".join(text_without_usernames.split()).strip()
     
     if not cleaned:
         cleaned = fallback_name
         
-    return f"🎬 **{cleaned}**"
+    # Custom customized output format with your watermark layout
+    return f"🎬 **{cleaned}**\n\n📥 **Shared via Movie Bot**"
 
 # Helper Function to Generate Pagination Markup for Search Results
 def get_search_markup(results, query_text, page=1, per_page=10, is_group=False):
@@ -133,7 +136,7 @@ async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-    # Background Worker to process queued files safely with a 3s gap to avoid FloodWait (Single Status Message)
+    # Background Worker to process queued files safely & notify groups
     async def process_file_queue():
         global is_processing_queue
         is_processing_queue = True
@@ -153,9 +156,36 @@ async def main():
                 raw_caption = message.caption or fallback
                 final_caption = clean_caption(raw_caption, fallback)
                 
-                await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
+                added_file_msg = await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
                 
-                await asyncio.sleep(3)  # Safe 3 seconds delay between files to prevent FloodWait
+                # --- BROADCAST DIRECT UPLOADED FILE TO ALL GROUPS ---
+                if os.path.exists(GROUP_DB_FILE):
+                    with open(GROUP_DB_FILE, "r") as gf:
+                        groups = gf.read().splitlines()
+                        
+                    kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(f"📥 Get File", callback_data=f"pmget_{added_file_msg.id}")]
+                    ])
+                    announcement_text = (
+                        f"🔥 **New File Added to Database!**\n\n"
+                        f"🎬 **Title:** `{fallback}`\n\n"
+                        f"👇 Click the button below to get it in your **Personal Chat (PM)**:"
+                    )
+                    for g_id in groups:
+                        try:
+                            grp_msg = await main_bot.send_message(int(g_id), announcement_text, reply_markup=kb)
+                            async def del_announcement(m):
+                                await asyncio.sleep(600)
+                                try:
+                                    await m.delete()
+                                except:
+                                    pass
+                            asyncio.create_task(del_announcement(grp_msg))
+                        except Exception as ge:
+                            print(f"Failed to send to group {g_id}: {ge}")
+                # ----------------------------------------------------
+
+                await asyncio.sleep(3)
             except Exception as e:
                 print(f"Queue Processing Error: {e}")
             
@@ -163,7 +193,7 @@ async def main():
         
         if status_msg:
             try:
-                await status_msg.edit_text("✨ **All files successfully saved to database channel with clean names!**")
+                await status_msg.edit_text("✨ **All files successfully saved & broadcasted to groups!**")
             except:
                 pass
         is_processing_queue = False
@@ -174,9 +204,9 @@ async def main():
         for member in message.new_chat_members:
             if member.id == (await client.get_me()).id:
                 save_group(message.chat.id)
-                await message.reply_text("👋 **Hello! Thanks for adding me here.**\n\nSend any movie name (min 4 letters) and I will give you the files via buttons!")
+                await message.reply_text("👋 **Hello! Thanks for adding me here.**\n\nSend any movie name and I will give you the files via buttons!")
 
-    # 1. Start Command (/start) with Menu Buttons
+    # Start Command (/start) with Menu Buttons
     @main_bot.on_message(filters.command("start") & filters.private)
     async def start_cmd(client: Client, message: Message):
         save_user(message.from_user.id)
@@ -184,7 +214,7 @@ async def main():
         welcome_text = (
             f"👋 **Hello {message.from_user.mention},**\n\n"
             "🎬 **Welcome to Movie Finder Bot!**\n\n"
-            "Just type and send the name of the movie you are looking for (Minimum 4 letters)."
+            "Just type and send the name of the movie you are looking for."
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📂 Available Files", callback_data="available_files_btn")],
@@ -204,7 +234,7 @@ async def main():
             await status_msg.edit_text(
                 f"📁 **Database Status:**\n\n"
                 f"✅ Total Available Files: `{count}`\n\n"
-                f"💡 *Type any movie name (minimum 4 letters) to search and download!*"
+                f"💡 *Type any movie name to search and download!*"
             )
         except Exception as e:
             await status_msg.edit_text("❌ Failed to fetch file count. Please try again later.")
@@ -226,7 +256,7 @@ async def main():
             reply_markup=keyboard
         )
 
-    # 5. Broadcast Command (/broadcast) for Admins to All Users and Groups
+    # Broadcast Command (/broadcast)
     @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
     async def broadcast_cmd(client: Client, message: Message):
         if not message.reply_to_message:
@@ -241,29 +271,25 @@ async def main():
         success_groups = 0
         failed_groups = 0
 
-        # 1. Broadcast to Users
         if os.path.exists(USER_DB_FILE):
             with open(USER_DB_FILE, "r") as f:
                 users = f.read().splitlines()
-            
             for u_id in users:
                 try:
                     await broadcast_msg.copy(chat_id=int(u_id))
                     success_users += 1
-                    await asyncio.sleep(0.1) # Prevent FloodWait
+                    await asyncio.sleep(0.1)
                 except Exception:
                     failed_users += 1
 
-        # 2. Broadcast to Groups
         if os.path.exists(GROUP_DB_FILE):
             with open(GROUP_DB_FILE, "r") as gf:
                 groups = gf.read().splitlines()
-            
             for g_id in groups:
                 try:
                     await broadcast_msg.copy(chat_id=int(g_id))
                     success_groups += 1
-                    await asyncio.sleep(0.1) # Prevent FloodWait
+                    await asyncio.sleep(0.1)
                 except Exception:
                     failed_groups += 1
 
@@ -273,7 +299,7 @@ async def main():
             f"👥 **Groups:** Success: `{success_groups}` | Failed: `{failed_groups}`"
         )
 
-    # 2. Direct File Receiver Handler for Admins (Queues up to 100+ files with single status message)
+    # Direct File Receiver Handler for Admins
     @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_IDS))
     async def handle_direct_file(client: Client, message: Message):
         global is_processing_queue
@@ -291,7 +317,7 @@ async def main():
             await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
             print(f"Direct File Queue Error: {e}")
 
-    # 3. Admin Command: /add [Movie Name] (Broadcasts to all saved groups)
+    # Admin Command: /add [Movie Name] (With 2 Minutes Delay between each movie)
     @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_IDS))
     async def add_movie_cmd(client: Client, message: Message):
         global ADD_ENABLED
@@ -400,9 +426,9 @@ async def main():
                 if index < total_movies:
                     await status_msg.edit_text(
                         f"✅ Completed: `{movie}`\n"
-                        f"⏳ **Waiting 60 seconds before searching the next movie...** [{index}/{total_movies}]"
+                        f"⏳ **Waiting 2 minutes (120 seconds) before searching the next movie...** [{index}/{total_movies}]"
                     )
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(120)
                 else:
                     await asyncio.sleep(2)
 
@@ -416,7 +442,7 @@ async def main():
             f"❌ Failed / Not Found: `{failed_count}`"
         )
 
-    # 4. User Search Handler (Private & Group)
+    # User Search Handler (With Movie Request Button if not found)
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot)
     async def handle_user_search(client: Client, message: Message):
         if message.outgoing or message.from_user.is_bot:
@@ -433,11 +459,6 @@ async def main():
         if "t.me/" in movie_name:
             return
 
-        if len(movie_name) < 4:
-            if not is_group:
-                await message.reply_text("⚠️ **Please type at least 4 characters to search for a movie!**")
-            return
-
         status_msg = await message.reply_text(f"🔎 Searching for `{movie_name}`...")
 
         try:
@@ -450,7 +471,14 @@ async def main():
             await status_msg.delete()
 
             if not results:
-                sent_msg = await message.reply_text(f"❌ **No files found related to '{movie_name}'.**")
+                # Add Request Button if movie is not found
+                req_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📝 Request Admin", callback_data=f"request_{movie_name[:25]}")]
+                ])
+                sent_msg = await message.reply_text(
+                    f"❌ **No files found related to '{movie_name}'.**\n\n👇 Click below to request this movie from admin:",
+                    reply_markup=req_markup
+                )
                 if is_group:
                     async def del_err(m):
                         await asyncio.sleep(600)
@@ -489,12 +517,34 @@ async def main():
                 pass
             print(f"Search Error: {e}")
 
-    # 5. Callback Query Handler
+    # Callback Query Handler
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
         global ADD_ENABLED
         data = callback_query.data
         user_id = callback_query.from_user.id
+        user_mention = callback_query.from_user.mention
+
+        if data.startswith("request_"):
+            req_movie = data.replace("request_", "")
+            await callback_query.answer("📨 Movie request sent to admins!", show_alert=True)
+            
+            # Send notification to all admins
+            req_text = (
+                f"🚨 **New Movie Request!**\n\n"
+                f"👤 **User:** {user_mention} (`{user_id}`)\n"
+                f"🎬 **Movie Name:** `{req_movie}`"
+            )
+            for admin_id in ADMIN_IDS:
+                try:
+                    await client.send_message(admin_id, req_text)
+                except Exception as ex:
+                    print(f"Failed to notify admin {admin_id}: {ex}")
+            
+            await callback_query.message.edit_text(
+                f"✅ **Your request for '{req_movie}' has been sent to the admin successfully!**"
+            )
+            return
 
         if data == "toggle_add":
             if user_id not in ADMIN_IDS:
@@ -530,7 +580,7 @@ async def main():
                 await callback_query.message.reply_text(
                     f"📁 **Database Status:**\n\n"
                     f"✅ Total Available Files: `{count}`\n\n"
-                    f"💡 *Type any movie name (minimum 4 letters) to search and download!*"
+                    f"💡 *Type any movie name to search and download!*"
                 )
             except Exception as e:
                 await callback_query.message.reply_text("❌ Failed to fetch file count. Please try again later.")
@@ -608,7 +658,7 @@ async def main():
                 ])
                 await callback_query.answer("⚠️ Please start the bot in Personal Chat (PM) first!", show_alert=True)
                 await callback_query.message.reply_text(
-                    f"👋 {callback_query.from_user.mention}, please start the bot in your **Personal Chat (PM)** to receive files!",
+                    f"👋 {user_mention}, please start the bot in your **Personal Chat (PM)** to receive files!",
                     reply_markup=pm_keyboard
                 )
                 return
@@ -668,7 +718,6 @@ async def main():
                 await callback_query.message.reply_text("❌ Failed to send file. Please try again later.")
                 print(f"Copy Error: {e}")
 
-    # Start Flask in a separate thread so it binds to Render's port
     Thread(target=run_flask, daemon=True).start()
 
     await userbot.start()
