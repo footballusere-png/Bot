@@ -6,7 +6,7 @@ from threading import Thread
 from flask import Flask
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from hydrogram.errors import UserNotParticipant, FloodWait
+from hydrogram.errors import UserNotParticipant
 
 # ------------ CONFIGURATION ------------
 API_ID = 28300966
@@ -78,10 +78,10 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Clean Caption
+# Helper Function: Clean Caption with Premium Style
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
-        return f"🎬 **{fallback_name}**\n\n✨ **Powered by Movie Bot**"
+        return f"🎬 **{fallback_name}**\n\n✨ ᴘᴏᴡᴇʀᴇᴅ ʙʏ: **Official Movie Bot** ⚡"
     
     text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', original_text)
     text_without_usernames = re.sub(r'@\w+', '', text_without_links)
@@ -90,7 +90,7 @@ def clean_caption(original_text: str, fallback_name: str) -> str:
     if not cleaned:
         cleaned = fallback_name
         
-    return f"🎬 **{cleaned}**\n\n📥 **Shared via Movie Bot**"
+    return f"🎬 **{cleaned}**\n\n📥 **ꜱʜᴀʀᴇᴅ ᴠɪᴀ ᴏꜰꜰɪᴄɪᴀʟ ᴍᴏᴠɪᴇ ʙᴏᴛ** ✨"
 
 # Helper Function for Pagination
 def get_search_markup(results, query_text, page=1, per_page=10, is_group=False):
@@ -113,17 +113,17 @@ def get_search_markup(results, query_text, page=1, per_page=10, is_group=False):
             title = title[:37] + "..."
         
         cb_prefix = "pmget_" if is_group else "get_"
-        buttons.append([InlineKeyboardButton(title, callback_data=f"{cb_prefix}{item['id']}")])
+        buttons.append([InlineKeyboardButton(f"🎬 {title}", callback_data=f"{cb_prefix}{item['id']}")])
         
     nav_prefix = "grpsearch_" if is_group else "search_"
     nav_buttons = []
     if page > 1:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{nav_prefix}{query_text}_{page-1}"))
+        nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"{nav_prefix}{query_text}_{page-1}"))
     
-    nav_buttons.append(InlineKeyboardButton(f"📄 Page {page} of {total_pages}", callback_data="noop"))
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page} / {total_pages}", callback_data="noop"))
     
     if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{nav_prefix}{query_text}_{page+1}"))
+        nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"{nav_prefix}{query_text}_{page+1}"))
         
     if nav_buttons:
         buttons.append(nav_buttons)
@@ -154,7 +154,7 @@ async def main():
             
             try:
                 if status_msg:
-                    await status_msg.edit_text(f"📤 **Uploading files... [{current_index}/{total_in_batch}]**")
+                    await status_msg.edit_text(f"⚡ **Uploading files... [{current_index}/{total_in_batch}]**")
 
                 fallback = message.document.file_name if message.document else (message.video.file_name if message.video and message.video.file_name else "Movie File")
                 raw_caption = message.caption or fallback
@@ -162,27 +162,27 @@ async def main():
                 
                 added_file_msg = await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
                 
-                # --- BROADCAST NEW FILE TO GROUPS (Permanent, No Auto-Delete) ---
+                # --- PERMANENT GROUP ANNOUNCEMENT (NO AUTO-DELETE) ---
                 if os.path.exists(GROUP_DB_FILE):
                     with open(GROUP_DB_FILE, "r") as gf:
                         groups = gf.read().splitlines()
                         
                     kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(f"📥 Get File", callback_data=f"pmget_{added_file_msg.id}")]
+                        [InlineKeyboardButton(f"📥 ɢᴇᴛ ғɪʟᴇ ɪɴ ᴘᴍ", callback_data=f"pmget_{added_file_msg.id}")]
                     ])
                     announcement_text = (
                         f"🔥 **New File Added to Database!**\n\n"
-                        f"🎬 **Title:** `{fallback}`\n\n"
-                        f"👇 Click the button below to get it in your **Personal Chat (PM)**:"
+                        f"📂 **File Name:** `{fallback}`\n\n"
+                        f"👇 **Click the button below to get it instantly in your Personal Chat (PM):**"
                     )
                     for g_id in groups:
                         try:
                             await main_bot.send_message(int(g_id), announcement_text, reply_markup=kb)
-                        except Exception as ge:
-                            print(f"Failed to send to group {g_id}: {ge}")
-                # -------------------------------------------------------------
+                        except Exception:
+                            pass
+                # ------------------------------------------------------
 
-                await asyncio.sleep(2)
+                await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"Queue Processing Error: {e}")
             
@@ -190,7 +190,7 @@ async def main():
         
         if status_msg:
             try:
-                await status_msg.edit_text(f"✨ **Successfully uploaded all files! [{total_in_batch}/{total_in_batch}]**")
+                await status_msg.edit_text(f"✨ **Successfully uploaded all files! [{total_in_batch}/{total_in_batch}]** ✅")
             except:
                 pass
         is_processing_queue = False
@@ -200,7 +200,7 @@ async def main():
         for member in message.new_chat_members:
             if member.id == (await client.get_me()).id:
                 save_group(message.chat.id)
-                await message.reply_text("👋 **Hello! Thanks for adding me here.**\n\nSend any movie name and I will give you the files via buttons!")
+                await message.reply_text("👋 **Hello! Thanks for adding me here.**\n\n✨ Send any movie name and I will give you the files instantly via buttons!")
 
     @main_bot.on_message(filters.command("start") & filters.private)
     async def start_cmd(client: Client, message: Message):
@@ -208,8 +208,8 @@ async def main():
         
         welcome_text = (
             f"👋 **Hello {message.from_user.mention},**\n\n"
-            "🎬 **Welcome to Movie Finder Bot!**\n\n"
-            "Just type and send the name of the movie you are looking for."
+            "🎬 **Welcome to Premium Movie Finder Bot!**\n\n"
+            "✨ Just type and send the name of the movie or series you are looking for."
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📂 Available Files", callback_data="available_files_btn")],
@@ -230,9 +230,8 @@ async def main():
                 f"✅ Total Available Files: `{count}`\n\n"
                 f"💡 *Type any movie name to search and download!*"
             )
-        except Exception as e:
+        except Exception:
             await status_msg.edit_text("❌ Failed to fetch file count. Please try again later.")
-            print(f"Available Files Error: {e}")
 
     @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_IDS))
     async def admin_panel(client: Client, message: Message):
@@ -245,49 +244,11 @@ async def main():
             [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
         ])
         await message.reply_text(
-            "⚙️ **Admin Control Panel**\n\nManage your bot settings below:",
+            "⚙️ **Admin Control Panel**\n\n✨ Manage your bot settings below:",
             reply_markup=keyboard
         )
 
-    @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
-    async def broadcast_cmd(client: Client, message: Message):
-        if not message.reply_to_message:
-            await message.reply_text("⚠️ **Please reply to any message to broadcast it!**")
-            return
-
-        status_msg = await message.reply_text("📢 **Broadcasting started...**")
-        broadcast_msg = message.reply_to_message
-        success_users, failed_users, success_groups, failed_groups = 0, 0, 0, 0
-
-        if os.path.exists(USER_DB_FILE):
-            with open(USER_DB_FILE, "r") as f:
-                users = f.read().splitlines()
-            for u_id in users:
-                try:
-                    await broadcast_msg.copy(chat_id=int(u_id))
-                    success_users += 1
-                    await asyncio.sleep(0.1)
-                except Exception:
-                    failed_users += 1
-
-        if os.path.exists(GROUP_DB_FILE):
-            with open(GROUP_DB_FILE, "r") as gf:
-                groups = gf.read().splitlines()
-            for g_id in groups:
-                try:
-                    await broadcast_msg.copy(chat_id=int(g_id))
-                    success_groups += 1
-                    await asyncio.sleep(0.1)
-                except Exception:
-                    failed_groups += 1
-
-        await status_msg.edit_text(
-            f"✨ **Broadcast Completed!**\n\n"
-            f"👤 **Users:** Success: `{success_users}` | Failed: `{failed_users}`\n"
-            f"👥 **Groups:** Success: `{success_groups}` | Failed: `{failed_groups}`"
-        )
-
-    # Direct File Receiver Handler for Admins (Queues files cleanly)
+    # Direct File Forward Handler for Admins (Live Progress Bar)
     @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_IDS))
     async def handle_direct_file(client: Client, message: Message):
         global is_processing_queue
@@ -302,108 +263,6 @@ async def main():
                 asyncio.create_task(process_file_queue())
         except Exception as e:
             await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
-            print(f"Direct File Queue Error: {e}")
-
-    @main_bot.on_message(filters.command("add") & filters.private & filters.user(ADMIN_IDS))
-    async def add_movie_cmd(client: Client, message: Message):
-        global ADD_ENABLED
-        if not ADD_ENABLED:
-            await message.reply_text("❌ **The Add feature is currently turned OFF.**")
-            return
-
-        lines = message.text.split("\n")
-        movies_to_process = []
-        
-        if len(lines) == 1:
-            parts = lines[0].split(None, 1)
-            if len(parts) > 1:
-                movies_to_process.append(parts[1].strip())
-        else:
-            for line in lines:
-                cleaned = line.replace("/add", "").strip()
-                if cleaned:
-                    movies_to_process.append(cleaned)
-
-        if not movies_to_process:
-            await message.reply_text("⚠️ **Usage:** `/add movie_name`")
-            return
-
-        status_msg = await message.reply_text("⏳ **Indexing process started...**")
-        success_count, failed_count = 0, 0
-        total_movies = len(movies_to_process)
-
-        for index, movie in enumerate(movies_to_process, start=1):
-            if not ADD_ENABLED:
-                await status_msg.edit_text("⚠️ **Process aborted! Add feature turned off.**")
-                return
-
-            try:
-                await status_msg.edit_text(f"🔍 **Processing [{index}/{total_movies}]:** `{movie}`")
-                
-                sent_msg = await userbot.send_message(TARGET_BOT, movie)
-                await asyncio.sleep(6)
-
-                first_link = None
-                async for reply in userbot.get_chat_history(TARGET_BOT, limit=5):
-                    if reply.id > sent_msg.id and reply.text and reply.entities:
-                        for entity in reply.entities:
-                            if entity.type.name == "TEXT_LINK" and entity.url:
-                                first_link = entity.url
-                                break
-                    if first_link:
-                        break
-
-                if first_link and "start=" in first_link:
-                    param = first_link.split("start=")[1].split("?")[0]
-                    start_msg = await userbot.send_message(TARGET_BOT, f"/start {param}")
-                    await asyncio.sleep(6)
-
-                    file_added = False
-                    async for file_msg in userbot.get_chat_history(TARGET_BOT, limit=5):
-                        if file_msg.id > start_msg.id and (file_msg.document or file_msg.video):
-                            fallback = file_msg.document.file_name if file_msg.document else movie
-                            raw_caption = file_msg.caption or fallback
-                            final_caption = clean_caption(raw_caption, movie)
-                            
-                            added_file_msg = await file_msg.copy(chat_id=MY_CHANNEL, caption=final_caption)
-                            success_count += 1
-                            file_added = True
-
-                            if os.path.exists(GROUP_DB_FILE):
-                                with open(GROUP_DB_FILE, "r") as gf:
-                                    groups = gf.read().splitlines()
-                                    
-                                kb = InlineKeyboardMarkup([
-                                    [InlineKeyboardButton(f"📥 Get {movie}", callback_data=f"pmget_{added_file_msg.id}")]
-                                ])
-                                announcement_text = (
-                                    f"🔥 **New Movie Added to Database!**\n\n"
-                                    f"🎬 **Title:** `{movie}`\n\n"
-                                    f"👇 Click below to get it in your **Personal Chat (PM)**:"
-                                )
-                                for g_id in groups:
-                                    try:
-                                        await main_bot.send_message(int(g_id), announcement_text, reply_markup=kb)
-                                    except Exception as ge:
-                                        print(f"Failed to send to group {g_id}: {ge}")
-                            break
-                    
-                    if not file_added:
-                        failed_count += 1
-                else:
-                    failed_count += 1
-
-                if index < total_movies:
-                    await status_msg.edit_text(f"✅ Completed: `{movie}`\n⏳ **Waiting 2 minutes before next movie...** [{index}/{total_movies}]")
-                    await asyncio.sleep(120)
-                else:
-                    await asyncio.sleep(2)
-
-            except Exception as e:
-                failed_count += 1
-                print(f"Error adding {movie}: {e}")
-
-        await status_msg.edit_text(f"✨ **Process Completed!**\n\n📥 Added: `{success_count}` | ❌ Failed: `{failed_count}`")
 
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.private)
     async def handle_user_search(client: Client, message: Message):
@@ -418,7 +277,7 @@ async def main():
 
         if user_id in user_request_state:
             user_request_state.remove(user_id)
-            await message.reply_text("⏳ Thank you! Movie name received. **Wait the file.**")
+            await message.reply_text("⏳ Thank you! Movie name received. **Wait for the file.**")
             
             req_text = (
                 f"🚨 **New Movie Request!**\n\n"
@@ -428,11 +287,11 @@ async def main():
             for admin_id in ADMIN_IDS:
                 try:
                     await client.send_message(admin_id, req_text)
-                except Exception as ex:
-                    print(f"Failed to notify admin {admin_id}: {ex}")
+                except Exception:
+                    pass
             return
 
-        status_msg = await message.reply_text(f"🔎 Searching for `{text}`...")
+        status_msg = await message.reply_text(f"🔎 **Searching for** `{text}`...")
 
         try:
             results = []
@@ -452,18 +311,17 @@ async def main():
                     reply_markup=req_markup
                 )
             else:
-                keyboard, total_pages = get_search_markup(results, text, page=1, is_group=False)
+                keyboard, _ = get_search_markup(results, text, page=1, is_group=False)
                 await message.reply_text(
-                    f"🎬 **Found {len(results)} files for '{text}':**\n\n👇 Click on your preferred file below:",
+                    f"🎬 **Found {len(results)} files for '{text}':**\n\n👇 **Click on your preferred file below:**",
                     reply_markup=keyboard
                 )
 
-        except Exception as e:
+        except Exception:
             try:
                 await status_msg.delete()
             except:
                 pass
-            print(f"Search Error: {e}")
 
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & (filters.group | filters.supergroup))
     async def handle_group_search(client: Client, message: Message):
@@ -472,7 +330,7 @@ async def main():
         if "t.me/" in movie_name:
             return
 
-        status_msg = await message.reply_text(f"🔎 Searching for `{movie_name}`...")
+        status_msg = await message.reply_text(f"🔎 **Searching for** `{movie_name}`...")
 
         try:
             results = []
@@ -493,10 +351,10 @@ async def main():
                         pass
                 asyncio.create_task(del_err(sent_msg))
             else:
-                keyboard, total_pages = get_search_markup(results, movie_name, page=1, is_group=True)
+                keyboard, _ = get_search_markup(results, movie_name, page=1, is_group=True)
                 text_msg = (
                     f"🎬 **Found {len(results)} files for '{movie_name}':**\n\n"
-                    f"👇 Click on any file below to get it in your **Personal Chat (PM)**!\n\n"
+                    f"👇 **Click on any file below to get it in your Personal Chat (PM)!**\n\n"
                     f"⚠️ *This message will be automatically deleted after 10 minutes.*"
                 )
                 sent_msg = await message.reply_text(text=text_msg, reply_markup=keyboard)
@@ -509,12 +367,11 @@ async def main():
                         pass
                 asyncio.create_task(delete_after_delay(sent_msg))
 
-        except Exception as e:
+        except Exception:
             try:
                 await status_msg.delete()
             except:
                 pass
-            print(f"Group Search Error: {e}")
 
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
@@ -545,7 +402,7 @@ async def main():
                 [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
             ])
             await callback_query.message.edit_text(
-                "⚙️ **Admin Control Panel**\n\nManage your bot settings below:",
+                "⚙️ **Admin Control Panel**\n\n✨ Manage your bot settings below:",
                 reply_markup=keyboard
             )
             await callback_query.answer(f"Add feature is now {'Enabled' if ADD_ENABLED else 'Disabled'}!", show_alert=False)
@@ -567,9 +424,8 @@ async def main():
                     f"✅ Total Available Files: `{count}`\n\n"
                     f"💡 *Type any movie name to search and download!*"
                 )
-            except Exception as e:
+            except Exception:
                 await callback_query.message.reply_text("❌ Failed to fetch file count. Please try again later.")
-                print(f"Available Files Callback Error: {e}")
             return
 
         if data.startswith("search_") or data.startswith("grpsearch_"):
@@ -590,14 +446,13 @@ async def main():
                     await callback_query.answer("❌ No files found!", show_alert=True)
                     return
 
-                keyboard, total_pages = get_search_markup(results, query_text, page=page, is_group=is_grp)
+                keyboard, _ = get_search_markup(results, query_text, page=page, is_group=is_grp)
                 await callback_query.message.edit_text(
-                    f"🎬 **Found {len(results)} files for '{query_text}':**\n\n👇 Click on your preferred file below:",
+                    f"🎬 **Found {len(results)} files for '{query_text}':**\n\n👇 **Click on your preferred file below:**",
                     reply_markup=keyboard
                 )
                 await callback_query.answer()
-            except Exception as e:
-                print(f"Pagination Error: {e}")
+            except Exception:
                 await callback_query.answer("❌ Error loading page!", show_alert=True)
             return
 
@@ -608,7 +463,7 @@ async def main():
             if is_pm:
                 bot_username = (await client.get_me()).username
                 try:
-                    await client.send_message(user_id, "👋 Hello! Here is your requested file:")
+                    await client.send_message(user_id, "👋 **Hello! Here is your requested file:**")
                 except Exception:
                     start_link = f"https://t.me/{bot_username}?start=start"
                     pm_keyboard = InlineKeyboardMarkup([
@@ -646,7 +501,6 @@ async def main():
             await callback_query.answer("📥 Sending file...", show_alert=False)
             target_chat = user_id if is_pm else callback_query.message.chat.id
             try:
-                # Send the file to the user
                 sent_file = await main_bot.copy_message(
                     chat_id=target_chat,
                     from_chat_id=MY_CHANNEL,
@@ -663,15 +517,14 @@ async def main():
                 asyncio.create_task(auto_delete_file(sent_file))
                 # ---------------------------------------------------------
 
-            except Exception as e:
+            except Exception:
                 await client.send_message(target_chat, "❌ Failed to send file. Please try again later.")
-                print(f"Copy Error: {e}")
 
     Thread(target=run_flask, daemon=True).start()
 
     await userbot.start()
     await main_bot.start()
-    print("🚀 Movie Bot & Web Server successfully running!")
+    print("🚀 Premium Movie Bot & Web Server successfully running!")
 
     await asyncio.Event().wait()
 
