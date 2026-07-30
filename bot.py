@@ -19,8 +19,8 @@ TARGET_BOT = "@DPCBackup_Files_01_Bot"  # Backup bot
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1002702148703
-UPDATE_CHANNEL_LINK = "https://t.me/yt_insta_tiktok_video_downloader"
+FORCE_SUB_CHANNEL = -1002644197954
+UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
 # Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
@@ -337,7 +337,6 @@ async def main():
                         success_count += 1
                         await asyncio.sleep(0.3)  # Prevent flood wait
                     except Exception:
-                        fail_count + 1
                         fail_count += 1
 
                 await status_msg.edit_text(
@@ -451,7 +450,7 @@ async def main():
             except:
                 pass
 
-    @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & (filters.group | filters.supergroup))
+    @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.group)
     async def handle_group_search(client: Client, message: Message):
         save_group(message.chat.id)
         movie_name = message.text.strip()
