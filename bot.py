@@ -19,8 +19,8 @@ TARGET_BOT = "@DPCBackup_Files_01_Bot"  # Backup bot
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
+FORCE_SUB_CHANNEL = -1002702148703
+UPDATE_CHANNEL_LINK = "https://t.me/yt_insta_tiktok_video_downloader"
 
 # Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
@@ -33,6 +33,10 @@ ADD_ENABLED = True
 file_queue = asyncio.Queue()
 is_processing_queue = False
 user_request_state = set()
+
+# Broadcast & User Chat States for Admins
+broadcast_state = {}  # Stores admin_id -> {"step": "waiting_ids" or "waiting_msg", "users": []}
+admin_chat_state = {} # Stores admin_id -> target user id for direct chatting
 # ----------------------------------------
 
 # Dummy Flask App to satisfy Render Port Binding requirement
@@ -162,7 +166,7 @@ async def main():
                 
                 added_file_msg = await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
                 
-                # --- PERMANENT GROUP ANNOUNCEMENT (NO AUTO-DELETE) ---
+                # --- PERMANENT GROUP ANNOUNCEMENT ---
                 if os.path.exists(GROUP_DB_FILE):
                     with open(GROUP_DB_FILE, "r") as gf:
                         groups = gf.read().splitlines()
@@ -241,28 +245,152 @@ async def main():
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
-            [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
+            [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")],
+            [InlineKeyboardButton("👤 User Chat", callback_data="admin_user_chat_btn")],
+            [InlineKeyboardButton("📢 Multi Ads (/ad)", callback_data="admin_ad_btn")]
         ])
         await message.reply_text(
             "⚙️ **Admin Control Panel**\n\n✨ Manage your bot settings below:",
             reply_markup=keyboard
         )
 
-    # Direct File Forward Handler for Admins (Live Progress Bar)
-    @main_bot.on_message((filters.document | filters.video | filters.audio) & filters.private & filters.user(ADMIN_IDS))
-    async def handle_direct_file(client: Client, message: Message):
-        global is_processing_queue
-        try:
-            status_msg = None
-            if file_queue.empty() and not is_processing_queue:
-                status_msg = await message.reply_text("📥 **Initializing upload queue...**")
+    # --- /ad COMMAND HANDLER (MULTIPLE USER ID BROADCAST) ---
+    @main_bot.on_message(filters.command("ad") & filters.private & filters.user(ADMIN_IDS))
+    async def ad_command(client: Client, message: Message):
+        user_id = message.from_user.id
+        broadcast_state[user_id] = {"step": "waiting_ids", "users": []}
+        
+        sample_texts = (
+            "📢 **Multi-Language Promotional Messages Sample:**\n\n"
+            "1️⃣ **Malayalam:**\n🎬 ഫ്രീയായി സിനിമകൾ കാണാൻ ആഗ്രഹിക്കുന്നുണ്ടോ? ഞങ്ങളുടെ പുതിയ Movie Bot-ലേക്ക് സ്വാഗതം! ഏറ്റവും പുതിയ മലയാളം, തമിഴ്, ഹിന്ദി സിനിമകൾ ഇനി ഈ ബോട്ടിലൂടെ ഡൗൺലോഡ് ചെയ്യാം.\n\n"
+            "2️⃣ **English:**\n🎬 Want to watch movies for FREE? Get the latest Hollywood, Bollywood, and South movies instantly delivered to your chat!\n\n"
+            "3️⃣ **Hindi:**\n🎬 क्या आप फ्री में फिल्में देखना चाहते हैं? हमारे नए Movie Bot में आपका स्वागत है!\n\n"
+            "👇 **ഇപ്പോൾ യൂസർ ഐഡികൾ ഓരോന്നായി അല്ലെങ്കിൽ ലൈൻ ബൈ ലൈൻ അയക്കൂ.**\n"
+            "അയച്ചു കഴിഞ്ഞാൽ `/done` എന്ന് ടൈപ്പ് ചെയ്യുക. *(നിർത്താൻ /cancel നൽകുക)*"
+        )
+        await message.reply_text(sample_texts)
 
-            await file_queue.put({"message": message, "status_msg": status_msg})
+    # Admin Messages Handler (User Chat & /ad Collection/Broadcast)
+    @main_bot.on_message((filters.document | filters.video | filters.audio | filters.text) & filters.private & filters.user(ADMIN_IDS))
+    async def handle_admin_messages(client: Client, message: Message):
+        global is_processing_queue
+        user_id = message.from_user.id
+        text_content = message.text.strip() if message.text else ""
+
+        # Cancel command check
+        if text_content == "/cancel":
+            if user_id in admin_chat_state:
+                del admin_chat_state[user_id]
+            if user_id in broadcast_state:
+                del broadcast_state[user_id]
+            await message.reply_text("❌ **Operation cancelled successfully.**")
+            return
+
+        # 1. Check if Admin is in Broadcast State (/ad)
+        if user_id in broadcast_state:
+            state = broadcast_state[user_id]
             
-            if not is_processing_queue:
-                asyncio.create_task(process_file_queue())
-        except Exception as e:
-            await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
+            # Step A: Collecting User IDs line by line
+            if state["step"] == "waiting_ids":
+                if text_content == "/done":
+                    if not state["users"]:
+                        await message.reply_text("❌ No valid User IDs received! Please send at least one User ID or type /cancel.")
+                        return
+                    
+                    state["step"] = "waiting_message"
+                    bot_username = (await client.get_me()).username
+                    await message.reply_text(
+                        f"✅ **Total {len(state['users'])} User IDs collected successfully!**\n\n"
+                        f"💬 **Now send the promotional message or media you want to broadcast to these users.**\n"
+                        f"*(Tip: You can use @{bot_username} link inside your message text)*"
+                    )
+                    return
+                else:
+                    lines = text_content.split("\n")
+                    added_count = 0
+                    for line in lines:
+                        clean_line = line.strip()
+                        if clean_line.isdigit():
+                            uid = int(clean_line)
+                            if uid not in state["users"]:
+                                state["users"].append(uid)
+                                added_count += 1
+                    
+                    await message.reply_text(
+                        f"📥 Added `{added_count}` IDs. Total accumulated: `{len(state['users'])}`\n"
+                        f"Send more IDs or type `/done` to proceed to message sending."
+                    )
+                    return
+
+            # Step B: Sending the message/media to collected users
+            elif state["step"] == "waiting_message":
+                target_users = state["users"]
+                del broadcast_state[user_id]
+                
+                status_msg = await message.reply_text(f"🚀 **Broadcasting message to {len(target_users)} users... Please wait.**")
+                success_count = 0
+                fail_count = 0
+                
+                for uid in target_users:
+                    try:
+                        await message.copy(chat_id=uid)
+                        success_count += 1
+                        await asyncio.sleep(0.3)  # Prevent flood wait
+                    except Exception:
+                        fail_count + 1
+                        fail_count += 1
+
+                await status_msg.edit_text(
+                    f"✨ **Broadcast Completed Successfully!** ✅\n\n"
+                    f"👥 Total Target Users: `{len(target_users)}`\n"
+                    f"🟢 Successful: `{success_count}`\n"
+                    f"🔴 Failed: `{fail_count}`"
+                )
+                return
+
+        # 2. Check if admin is in "User Chat" mode
+        if user_id in admin_chat_state:
+            state_data = admin_chat_state[user_id]
+            
+            if state_data["step"] == "waiting_user_id":
+                if not text_content.isdigit():
+                    await message.reply_text("❌ **Invalid User ID!** Please send a valid numeric User ID.")
+                    return
+                
+                target_user_id = int(text_content)
+                admin_chat_state[user_id] = {"step": "waiting_message", "target_user": target_user_id}
+                await message.reply_text(
+                    f"✅ Target User ID set to: `{target_user_id}`\n\n"
+                    f"💬 **Now send the message, photo, or file you want to send to this user.**\n"
+                    f"*(Type /cancel to exit)*"
+                )
+                return
+
+            elif state_data["step"] == "waiting_message":
+                target_user_id = state_data["target_user"]
+                try:
+                    await message.copy(chat_id=target_user_id)
+                    await message.reply_text(
+                        f"✨ **Message successfully sent to user (`{target_user_id}`)!**\n\n"
+                        f"Send another message to continue chatting, or type /cancel to exit."
+                    )
+                except Exception as e:
+                    await message.reply_text(f"❌ Failed to send message to user: `{str(e)}`")
+                return
+
+        # Handle file uploads if they are document/video/audio
+        if message.document or message.video or message.audio:
+            try:
+                status_msg = None
+                if file_queue.empty() and not is_processing_queue:
+                    status_msg = await message.reply_text("📥 **Initializing upload queue...**")
+
+                await file_queue.put({"message": message, "status_msg": status_msg})
+                
+                if not is_processing_queue:
+                    asyncio.create_task(process_file_queue())
+            except Exception as e:
+                await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
 
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.private)
     async def handle_user_search(client: Client, message: Message):
@@ -380,6 +508,35 @@ async def main():
         user_id = callback_query.from_user.id
         user_mention = callback_query.from_user.mention
 
+        if data == "admin_user_chat_btn":
+            if user_id not in ADMIN_IDS:
+                await callback_query.answer("⚠️ You are not authorized!", show_alert=True)
+                return
+            
+            admin_chat_state[user_id] = {"step": "waiting_user_id"}
+            await callback_query.answer()
+            await callback_query.message.edit_text(
+                "👤 **User Chat Mode Activated**\n\n"
+                "👇 **Please send the User ID** to whom you want to send the message:\n\n"
+                "*(Type /cancel to exit)*"
+            )
+            return
+
+        if data == "admin_ad_btn":
+            if user_id not in ADMIN_IDS:
+                await callback_query.answer("⚠️ You are not authorized!", show_alert=True)
+                return
+            
+            broadcast_state[user_id] = {"step": "waiting_ids", "users": []}
+            await callback_query.answer()
+            await callback_query.message.edit_text(
+                "📢 **Multi Ads Mode Activated (/ad)**\n\n"
+                "👇 **Send the User IDs line by line.**\n"
+                "Once finished, send `/done`.\n\n"
+                "*(Type /cancel to exit)*"
+            )
+            return
+
         if data == "request_admin_click":
             user_request_state.add(user_id)
             await callback_query.answer("Please send the movie name now!", show_alert=True)
@@ -399,7 +556,9 @@ async def main():
             
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
-                [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")]
+                [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")],
+                [InlineKeyboardButton("👤 User Chat", callback_data="admin_user_chat_btn")],
+                [InlineKeyboardButton("📢 Multi Ads (/ad)", callback_data="admin_ad_btn")]
             ])
             await callback_query.message.edit_text(
                 "⚙️ **Admin Control Panel**\n\n✨ Manage your bot settings below:",
@@ -507,7 +666,6 @@ async def main():
                     message_id=file_msg_id
                 )
                 
-                # --- AUTO DELETE SENT FILE AFTER 1 HOUR (3600 seconds) ---
                 async def auto_delete_file(msg):
                     await asyncio.sleep(3600)
                     try:
@@ -515,7 +673,6 @@ async def main():
                     except:
                         pass
                 asyncio.create_task(auto_delete_file(sent_file))
-                # ---------------------------------------------------------
 
             except Exception:
                 await client.send_message(target_chat, "❌ Failed to send file. Please try again later.")
