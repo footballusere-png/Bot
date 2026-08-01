@@ -1,4 +1,4 @@
-import asyncio
+limport asyncio
 import os
 import re
 import math
@@ -18,8 +18,8 @@ BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
+FORCE_SUB_CHANNEL = -1004349263818
+UPDATE_CHANNEL_LINK = "@mfbotupdates"
 
 # Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
