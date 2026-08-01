@@ -18,8 +18,8 @@ BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1004349263818
-UPDATE_CHANNEL_LINK = "https://t.me/mfbotupdates"
+FORCE_SUB_CHANNEL = -1002644197954
+UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
 # Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
@@ -89,7 +89,7 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Clean Caption with Developer Risham004 & Instagram Link
+# Helper Function: Clean Caption
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
         cleaned = fallback_name
@@ -272,11 +272,10 @@ async def main():
             reply_markup=keyboard
         )
 
-    # --- BROADCAST COMMAND WITH STATE DELAY FIX ---
     @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
     async def broadcast_command(client: Client, message: Message):
         user_id = message.from_user.id
-        broadcast_state[user_id] = False  # False means waiting for broadcast message safely
+        broadcast_state[user_id] = False
         
         await message.reply_text(
             "📢 **Broadcast Mode Activated**\n\n"
@@ -298,7 +297,6 @@ async def main():
             await message.reply_text("❌ **Operation cancelled successfully.**")
             return
 
-        # Handle Broadcast to All Saved Users (Ensuring state is ready)
         if user_id in broadcast_state and broadcast_state[user_id] is False:
             del broadcast_state[user_id]
             
@@ -329,7 +327,6 @@ async def main():
             )
             return
 
-        # Handle User Chat Mode
         if user_id in admin_chat_state:
             state_data = admin_chat_state[user_id]
             
@@ -352,7 +349,6 @@ async def main():
                     await message.reply_text(f"❌ Failed: `{str(e)}`")
                 return
 
-        # Queue File Uploads
         if message.document or message.video or message.audio:
             try:
                 status_msg = None
@@ -394,8 +390,8 @@ async def main():
         try:
             results = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=text):
-                if ch_message.document or ch_message.video or ch_message.audio:
-                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
+                if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
+                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
                     size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                     size_str = get_readable_size(size_bytes)
                     results.append({"id": ch_message.id, "title": title, "size": size_str})
@@ -417,11 +413,13 @@ async def main():
                     reply_markup=keyboard
                 )
 
-        except Exception:
+        except Exception as e:
+            print(f"Search Error (PM): {e}")
             try:
                 await status_msg.delete()
             except:
                 pass
+            await message.reply_text("❌ An error occurred while searching. Please try again.")
 
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.group)
     async def handle_group_search(client: Client, message: Message):
@@ -435,8 +433,8 @@ async def main():
         try:
             results = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
-                if ch_message.document or ch_message.video or ch_message.audio:
-                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
+                if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
+                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
                     size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                     size_str = get_readable_size(size_bytes)
                     results.append({"id": ch_message.id, "title": title, "size": size_str})
@@ -465,7 +463,8 @@ async def main():
                     except: pass
                 asyncio.create_task(delete_after_delay(sent_msg))
 
-        except Exception:
+        except Exception as e:
+            print(f"Search Error (Group): {e}")
             try: await status_msg.delete()
             except: pass
 
@@ -489,7 +488,7 @@ async def main():
             if user_id not in ADMIN_IDS:
                 await callback_query.answer("⚠️ Not authorized!", show_alert=True)
                 return
-            broadcast_state[user_id] = False  # Safe state initialization
+            broadcast_state[user_id] = False
             await callback_query.answer()
             await callback_query.message.edit_text(
                 "📢 **Broadcast Mode Activated**\n\n"
@@ -545,8 +544,8 @@ async def main():
             try:
                 results = []
                 async for ch_message in userbot.search_messages(MY_CHANNEL, query=query_text):
-                    if ch_message.document or ch_message.video or ch_message.audio:
-                        title = ch_message.caption or (ch_message.document.file_name if ch_message.document else "Movie File")
+                    if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
+                        title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
                         size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                         size_str = get_readable_size(size_bytes)
                         results.append({"id": ch_message.id, "title": title, "size": size_str})
