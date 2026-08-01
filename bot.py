@@ -18,7 +18,7 @@ BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = --1002702148703
+FORCE_SUB_CHANNEL = -1002702148703
 UPDATE_CHANNEL_LINK = "https://t.me/yt_insta_tiktok_video_downloader"
 
 # Multiple Admins Configuration
@@ -89,19 +89,23 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Clean Caption
+# Helper Function: Clean Caption with Developer Risham004 & Instagram Link
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
-        return f"🎬 **{fallback_name}**\n\n✨ ᴘᴏᴡᴇʀᴇᴅ ʙʏ: **Official Movie Bot** ⚡"
-    
-    text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', original_text)
-    text_without_usernames = re.sub(r'@\w+', '', text_without_links)
-    cleaned = " ".join(text_without_usernames.split()).strip()
-    
-    if not cleaned:
         cleaned = fallback_name
+    else:
+        text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', original_text)
+        text_without_usernames = re.sub(r'@\w+', '', text_without_links)
+        cleaned = " ".join(text_without_usernames.split()).strip()
+        if not cleaned:
+            cleaned = fallback_name
         
-    return f"🎬 **{cleaned}**\n\n📥 **ꜱʜᴀʀᴇᴅ ᴠɪᴀ ᴏꜰꜰɪᴄɪᴀʟ ᴍᴏᴠɪᴇ ʙᴏᴛ** ✨"
+    return (
+        f"🎬 **{cleaned}**\n\n"
+        f"👑 **Developer:** `Risham004`\n"
+        f"📸 **Instagram:** https://instagram.com/trollpanda.in\n\n"
+        f"✨ **Shared via Official Movie Bot** ⚡"
+    )
 
 # Helper Function for Pagination with Size & Name
 def get_search_markup(results, query_text, page=1, per_page=10, is_group=False):
@@ -188,6 +192,8 @@ async def main():
                         f"🔥 **New File Added to Database!**\n\n"
                         f"📂 **File Name:** `{fallback}`\n"
                         f"📊 **File Size:** `{size_str}`\n\n"
+                        f"👑 **Developer:** `Risham004`\n"
+                        f"📸 **Instagram:** https://instagram.com/trollpanda.in\n\n"
                         f"👇 **Click the button below to get it instantly in your PM:**"
                     )
                     for g_id in groups:
@@ -222,7 +228,8 @@ async def main():
         
         welcome_text = (
             f"👋 **Hello {message.from_user.mention},**\n\n"
-            "🎬 **Welcome to Premium Movie Finder Bot!**\n\n"
+            "🎬 **Welcome to Premium Movie Finder Bot!**\n"
+            "👑 **Developer:** `Risham004`\n\n"
             "✨ Just type and send the name of the movie or series you are looking for."
         )
         keyboard = InlineKeyboardMarkup([
@@ -241,7 +248,8 @@ async def main():
             
             await status_msg.edit_text(
                 f"📁 **Database Status:**\n\n"
-                f"✅ Total Available Files: `{count}`\n\n"
+                f"✅ Total Available Files: `{count}`\n"
+                f"👑 **Developer:** `Risham004`\n\n"
                 f"💡 *Type any movie name to search and download!*"
             )
         except Exception:
@@ -264,14 +272,15 @@ async def main():
             reply_markup=keyboard
         )
 
-    # --- AUTOMatic BROADCAST COMMAND FOR ALL USERS ---
+    # --- BROADCAST COMMAND WITH STATE DELAY FIX ---
     @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
     async def broadcast_command(client: Client, message: Message):
         user_id = message.from_user.id
-        broadcast_state[user_id] = {"step": "waiting_broadcast_msg"}
+        broadcast_state[user_id] = False  # False means waiting for broadcast message safely
+        
         await message.reply_text(
             "📢 **Broadcast Mode Activated**\n\n"
-            "💬 Now send the promotional message, photo, video, or media you want to broadcast to **all users**.\n\n"
+            "💬 Now send the promotional message, photo, video, or media you want to broadcast to all users.\n\n"
             "*(Type /cancel to abort)*"
         )
 
@@ -289,8 +298,8 @@ async def main():
             await message.reply_text("❌ **Operation cancelled successfully.**")
             return
 
-        # Handle Broadcast to All Saved Users
-        if user_id in broadcast_state:
+        # Handle Broadcast to All Saved Users (Ensuring state is ready)
+        if user_id in broadcast_state and broadcast_state[user_id] is False:
             del broadcast_state[user_id]
             
             if not os.path.exists(USER_DB_FILE):
@@ -480,9 +489,13 @@ async def main():
             if user_id not in ADMIN_IDS:
                 await callback_query.answer("⚠️ Not authorized!", show_alert=True)
                 return
-            broadcast_state[user_id] = {"step": "waiting_broadcast_msg"}
+            broadcast_state[user_id] = False  # Safe state initialization
             await callback_query.answer()
-            await callback_query.message.edit_text("📢 **Broadcast Mode**\n\nSend the promotional message/media to broadcast to all users:")
+            await callback_query.message.edit_text(
+                "📢 **Broadcast Mode Activated**\n\n"
+                "💬 Now send the promotional message, photo, video, or media you want to broadcast to all users.\n\n"
+                "*(Type /cancel to abort)*"
+            )
             return
 
         if data == "request_admin_click":
@@ -518,7 +531,7 @@ async def main():
                 count = 0
                 async for _ in userbot.search_messages(MY_CHANNEL, query=""):
                     count += 1
-                await callback_query.message.reply_text(f"📁 **Database Status:**\n\n✅ Total Available Files: `{count}`")
+                await callback_query.message.reply_text(f"📁 **Database Status:**\n\n✅ Total Available Files: `{count}`\n👑 **Developer:** `Risham004`")
             except:
                 await callback_query.message.reply_text("❌ Failed to fetch count.")
             return
@@ -600,11 +613,12 @@ async def main():
                     message_id=file_msg_id
                 )
                 
-                # Copyright Warning & Auto-Delete Notice
                 warning_text = (
                     "⚠️ **Important Notice:**\n"
                     "Due to copyright issues, this file will be **automatically deleted after 1 hour (3600 seconds)**.\n"
-                    "📥 Please **forward this file** to your Saved Messages or personal channel immediately!"
+                    "📥 Please **forward this file** to your Saved Messages or personal channel immediately!\n\n"
+                    "👑 **Developer:** `Risham004`\n"
+                    "📸 **Instagram:** https://instagram.com/trollpanda.in"
                 )
                 warning_msg = await main_bot.send_message(target_chat, warning_text)
 
