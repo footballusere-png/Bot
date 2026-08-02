@@ -18,7 +18,7 @@ BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1004425036085
+FORCE_SUB_CHANNEL = -1003391211397
 UPDATE_CHANNEL_LINK = "https://t.me/mfbotupdates"
 
 # Multiple Admins Configuration (അഡ്മിൻമാർ മാത്രം)
