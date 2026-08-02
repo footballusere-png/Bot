@@ -18,10 +18,10 @@ BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1004425036085
-UPDATE_CHANNEL_LINK = "https://t.me/mfbotupdates"
+FORCE_SUB_CHANNEL = -1002644197954
+UPDATE_CHANNEL_LINK = "https://t.me/c/2644197954"
 
-# Multiple Admins Configuration
+# Multiple Admins Configuration (അഡ്മിൻമാർ മാത്രം)
 ADMIN_IDS = [7312906293, 7199304293]
 
 USER_DB_FILE = "users.txt"
@@ -46,25 +46,33 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# Helper Function: Save New Users
+# Helper Function: Save New Users (Duplicate ഒഴിവാക്കാൻ check ചെയ്തിരിക്കുന്നു)
 def save_user(user_id: int):
     if not os.path.exists(USER_DB_FILE):
         open(USER_DB_FILE, "w").close()
     
-    with open(USER_DB_FILE, "r+") as f:
-        users = f.read().splitlines()
+    try:
+        with open(USER_DB_FILE, "r") as f:
+            users = f.read().splitlines()
         if str(user_id) not in users:
-            f.write(f"{user_id}\n")
+            with open(USER_DB_FILE, "a") as f:
+                f.write(f"{user_id}\n")
+    except Exception:
+        pass
 
 # Helper Function: Save Groups
 def save_group(group_id: int):
     if not os.path.exists(GROUP_DB_FILE):
         open(GROUP_DB_FILE, "w").close()
     
-    with open(GROUP_DB_FILE, "r+") as f:
-        groups = f.read().splitlines()
+    try:
+        with open(GROUP_DB_FILE, "r") as f:
+            groups = f.read().splitlines()
         if str(group_id) not in groups:
-            f.write(f"{group_id}\n")
+            with open(GROUP_DB_FILE, "a") as f:
+                f.write(f"{group_id}\n")
+    except Exception:
+        pass
 
 # Helper Function: Format File Size
 def get_readable_size(size_in_bytes):
@@ -365,7 +373,6 @@ async def main():
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.private)
     async def handle_user_search(client: Client, message: Message):
         user_id = message.from_user.id
-        user_mention = message.from_user.mention
         text = message.text.strip()
 
         if "t.me/" in text:
@@ -376,13 +383,6 @@ async def main():
         if user_id in user_request_state:
             user_request_state.remove(user_id)
             await message.reply_text("⏳ Thank you! Movie name received. **Wait for the file.**")
-            
-            req_text = f"🚨 **New Movie Request!**\n\n👤 **User:** {user_mention} (`{user_id}`)\n🎬 **Requested Movie:** `{text}`"
-            for admin_id in ADMIN_IDS:
-                try:
-                    await client.send_message(admin_id, req_text)
-                except:
-                    pass
             return
 
         status_msg = await message.reply_text(f"🔎 **Searching for** `{text}`...")
@@ -612,9 +612,10 @@ async def main():
                     message_id=file_msg_id
                 )
                 
+                # ഫയൽ ഓട്ടോ-ഡിലീറ്റ് സമയം 10 മിനിറ്റായി (600 സെക്കൻഡ്) മാറ്റിയിരിക്കുന്നു
                 warning_text = (
                     "⚠️ **Important Notice:**\n"
-                    "Due to copyright issues, this file will be **automatically deleted after 1 hour (3600 seconds)**.\n"
+                    "Due to copyright issues, this file will be **automatically deleted after 10 minutes (600 seconds)**.\n"
                     "📥 Please **forward this file** to your Saved Messages or personal channel immediately!\n\n"
                     "👑 **Developer:** `Risham004`\n"
                     "📸 **Instagram:** https://instagram.com/trollpanda.in"
@@ -622,7 +623,7 @@ async def main():
                 warning_msg = await main_bot.send_message(target_chat, warning_text)
 
                 async def auto_delete_files(file_msg, warn_msg):
-                    await asyncio.sleep(3600)
+                    await asyncio.sleep(600)
                     try: await file_msg.delete()
                     except: pass
                     try: await warn_msg.delete()
