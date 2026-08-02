@@ -19,7 +19,7 @@ MY_CHANNEL = -1002696679922             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1003391211397
-UPDATE_CHANNEL_LINK = "https://t.me/mfbotupdates"
+UPDATE_CHANNEL_LINK = "https://t.me/mfottupdates"
 
 # Multiple Admins Configuration (അഡ്മിൻമാർ മാത്രം)
 ADMIN_IDS = [7312906293, 7199304293]
