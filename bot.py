@@ -15,7 +15,7 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
+MY_CHANNEL = -1002696679922             # Your backup/storage channel ID
 
 # Force Join Configuration
 FORCE_SUB_CHANNEL = -1002644197954
