@@ -15,22 +15,23 @@ STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX
 
 BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
 
-MY_CHANNEL = -1002696679922             # Your backup/storage channel ID
+MY_CHANNEL = -1004296254082             # Your backup/storage channel ID
 
 # Force Join Configuration
-FORCE_SUB_CHANNEL = -1003391211397
+FORCE_SUB_CHANNEL = -1002644197954
 UPDATE_CHANNEL_LINK = "https://t.me/mfottupdates"
 
-# Multiple Admins Configuration (അഡ്മിൻമാർ മാത്രം)
+# External Links & Usernames
+INSTAGRAM_LINK = "https://www.instagram.com/mf_ott_updates?igsh=ZHd0bjBycGxndHRo"
+ADMIN_BOT_LINK = "https://t.me/mfadmin_0_bot"
+
+# Multiple Admins Configuration
 ADMIN_IDS = [7312906293, 7199304293]
 
 USER_DB_FILE = "users.txt"
 GROUP_DB_FILE = "groups.txt"
 
 # Global variables
-ADD_ENABLED = True
-file_queue = asyncio.Queue()
-is_processing_queue = False
 user_request_state = set()
 broadcast_state = {} 
 admin_chat_state = {} 
@@ -46,11 +47,10 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# Helper Function: Save New Users (Duplicate ഒഴിവാക്കാൻ check ചെയ്തിരിക്കുന്നു)
+# Helper Function: Save New Users
 def save_user(user_id: int):
     if not os.path.exists(USER_DB_FILE):
         open(USER_DB_FILE, "w").close()
-    
     try:
         with open(USER_DB_FILE, "r") as f:
             users = f.read().splitlines()
@@ -64,7 +64,6 @@ def save_user(user_id: int):
 def save_group(group_id: int):
     if not os.path.exists(GROUP_DB_FILE):
         open(GROUP_DB_FILE, "w").close()
-    
     try:
         with open(GROUP_DB_FILE, "r") as f:
             groups = f.read().splitlines()
@@ -97,12 +96,14 @@ async def check_force_sub(client: Client, user_id: int) -> bool:
     except Exception:
         return True
 
-# Helper Function: Clean Caption
+# Helper Function: Clean Caption (Removes @prakyTV and other handles)
 def clean_caption(original_text: str, fallback_name: str) -> str:
     if not original_text:
         cleaned = fallback_name
     else:
-        text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', original_text)
+        # Remove @prakyTV specifically and any other usernames/links
+        text_without_specific = re.sub(r'@prakyTV', '', original_text, flags=re.IGNORECASE)
+        text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', text_without_specific)
         text_without_usernames = re.sub(r'@\w+', '', text_without_links)
         cleaned = " ".join(text_without_usernames.split()).strip()
         if not cleaned:
@@ -110,8 +111,7 @@ def clean_caption(original_text: str, fallback_name: str) -> str:
         
     return (
         f"🎬 **{cleaned}**\n\n"
-        f"👑 **Developer:** `Risham004`\n"
-        f"📸 **Instagram:** https://instagram.com/trollpanda.in\n\n"
+        f"👑 **Developer:** `Risham004`\n\n"
         f"✨ **Shared via Official Movie Bot** ⚡"
     )
 
@@ -159,70 +159,6 @@ async def main():
     userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
     main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-    async def process_file_queue():
-        global is_processing_queue
-        is_processing_queue = True
-        
-        total_in_batch = file_queue.qsize()
-        current_index = 0
-        status_msg = None
-        
-        while not file_queue.empty():
-            item = await file_queue.get()
-            message = item["message"]
-            raw_status_msg = item["status_msg"]
-            current_index += 1
-            
-            if not status_msg:
-                status_msg = raw_status_msg
-            
-            try:
-                if status_msg:
-                    await status_msg.edit_text(f"⚡ **Uploading files... [{current_index}/{total_in_batch}]**")
-
-                fallback = message.document.file_name if message.document else (message.video.file_name if message.video and message.video.file_name else "Movie File")
-                file_size_bytes = message.document.file_size if message.document else (message.video.file_size if message.video else 0)
-                size_str = get_readable_size(file_size_bytes)
-                
-                raw_caption = message.caption or fallback
-                final_caption = clean_caption(raw_caption, fallback)
-                
-                added_file_msg = await message.copy(chat_id=MY_CHANNEL, caption=final_caption)
-                
-                if os.path.exists(GROUP_DB_FILE):
-                    with open(GROUP_DB_FILE, "r") as gf:
-                        groups = gf.read().splitlines()
-                        
-                    kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(f"📥 ɢᴇᴛ ғɪʟᴇ ɪɴ ᴘᴍ [{size_str}]", callback_data=f"pmget_{added_file_msg.id}")]
-                    ])
-                    announcement_text = (
-                        f"🔥 **New File Added to Database!**\n\n"
-                        f"📂 **File Name:** `{fallback}`\n"
-                        f"📊 **File Size:** `{size_str}`\n\n"
-                        f"👑 **Developer:** `Risham004`\n"
-                        f"📸 **Instagram:** https://instagram.com/trollpanda.in\n\n"
-                        f"👇 **Click the button below to get it instantly in your PM:**"
-                    )
-                    for g_id in groups:
-                        try:
-                            await main_bot.send_message(int(g_id), announcement_text, reply_markup=kb)
-                        except Exception:
-                            pass
-
-                await asyncio.sleep(1.5)
-            except Exception as e:
-                print(f"Queue Error: {e}")
-            
-            file_queue.task_done()
-        
-        if status_msg:
-            try:
-                await status_msg.edit_text(f"✨ **Successfully uploaded all files! [{total_in_batch}/{total_in_batch}]** ✅")
-            except:
-                pass
-        is_processing_queue = False
-
     @main_bot.on_message(filters.new_chat_members)
     async def new_chat_member(client: Client, message: Message):
         for member in message.new_chat_members:
@@ -242,6 +178,7 @@ async def main():
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📂 Available Files", callback_data="available_files_btn")],
+            [InlineKeyboardButton("📸 Instagram", url=INSTAGRAM_LINK), InlineKeyboardButton("🤖 Admin Contact", url=ADMIN_BOT_LINK)],
             [InlineKeyboardButton("📢 Update Channel", url=UPDATE_CHANNEL_LINK)]
         ])
         await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
@@ -265,13 +202,7 @@ async def main():
 
     @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_IDS))
     async def admin_panel(client: Client, message: Message):
-        global ADD_ENABLED
-        status_text = "🟢 Enabled" if ADD_ENABLED else "🔴 Disabled"
-        toggle_btn_text = "Turn Off Add 🔴" if ADD_ENABLED else "Turn On Add 🟢"
-        
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
-            [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")],
             [InlineKeyboardButton("👤 User Chat", callback_data="admin_user_chat_btn")],
             [InlineKeyboardButton("📢 Broadcast (/broadcast)", callback_data="admin_broadcast_btn")]
         ])
@@ -284,7 +215,6 @@ async def main():
     async def broadcast_command(client: Client, message: Message):
         user_id = message.from_user.id
         broadcast_state[user_id] = False
-        
         await message.reply_text(
             "📢 **Broadcast Mode Activated**\n\n"
             "💬 Now send the promotional message, photo, video, or media you want to broadcast to all users.\n\n"
@@ -293,7 +223,6 @@ async def main():
 
     @main_bot.on_message((filters.document | filters.video | filters.audio | filters.text) & filters.private & filters.user(ADMIN_IDS))
     async def handle_admin_messages(client: Client, message: Message):
-        global is_processing_queue
         user_id = message.from_user.id
         text_content = message.text.strip() if message.text else ""
 
@@ -307,7 +236,6 @@ async def main():
 
         if user_id in broadcast_state and broadcast_state[user_id] is False:
             del broadcast_state[user_id]
-            
             if not os.path.exists(USER_DB_FILE):
                 await message.reply_text("❌ No users found in database (`users.txt`)!")
                 return
@@ -316,8 +244,7 @@ async def main():
                 target_users = [int(uid.strip()) for uid in f.read().splitlines() if uid.strip().isdigit()]
 
             status_msg = await message.reply_text(f"🚀 **Broadcasting to {len(target_users)} users... Please wait.**")
-            success_count = 0
-            fail_count = 0
+            success_count, fail_count = 0, 0
             
             for uid in target_users:
                 try:
@@ -337,17 +264,14 @@ async def main():
 
         if user_id in admin_chat_state:
             state_data = admin_chat_state[user_id]
-            
             if state_data["step"] == "waiting_user_id":
                 if not text_content.isdigit():
                     await message.reply_text("❌ **Invalid User ID!** Send a numeric ID.")
                     return
-                
                 target_user_id = int(text_content)
                 admin_chat_state[user_id] = {"step": "waiting_message", "target_user": target_user_id}
                 await message.reply_text(f"✅ Target User ID set to: `{target_user_id}`\n\n💬 Send your message now:")
                 return
-
             elif state_data["step"] == "waiting_message":
                 target_user_id = state_data["target_user"]
                 try:
@@ -356,19 +280,6 @@ async def main():
                 except Exception as e:
                     await message.reply_text(f"❌ Failed: `{str(e)}`")
                 return
-
-        if message.document or message.video or message.audio:
-            try:
-                status_msg = None
-                if file_queue.empty() and not is_processing_queue:
-                    status_msg = await message.reply_text("📥 **Initializing upload queue...**")
-
-                await file_queue.put({"message": message, "status_msg": status_msg})
-                
-                if not is_processing_queue:
-                    asyncio.create_task(process_file_queue())
-            except Exception as e:
-                await message.reply_text(f"❌ Failed to queue file: `{str(e)}`")
 
     @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.private)
     async def handle_user_search(client: Client, message: Message):
@@ -391,7 +302,11 @@ async def main():
             results = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=text):
                 if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
+                    raw_caption = ch_message.caption or ""
+                    fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
+                    
+                    # Clean the title by removing @prakyTV and other handles
+                    title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
                     size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                     size_str = get_readable_size(size_bytes)
                     results.append({"id": ch_message.id, "title": title, "size": size_str})
@@ -434,7 +349,10 @@ async def main():
             results = []
             async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
                 if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                    title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
+                    raw_caption = ch_message.caption or ""
+                    fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
+                    
+                    title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
                     size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                     size_str = get_readable_size(size_bytes)
                     results.append({"id": ch_message.id, "title": title, "size": size_str})
@@ -470,7 +388,6 @@ async def main():
 
     @main_bot.on_callback_query()
     async def callback_handler(client: Client, callback_query: CallbackQuery):
-        global ADD_ENABLED
         data = callback_query.data
         user_id = callback_query.from_user.id
         user_mention = callback_query.from_user.mention
@@ -503,23 +420,6 @@ async def main():
             await callback_query.message.edit_text("📝 **Please send the name of the movie you want to request:**")
             return
 
-        if data == "toggle_add":
-            if user_id not in ADMIN_IDS:
-                await callback_query.answer("⚠️ Not authorized!", show_alert=True)
-                return
-            ADD_ENABLED = not ADD_ENABLED
-            status_text = "🟢 Enabled" if ADD_ENABLED else "🔴 Disabled"
-            toggle_btn_text = "Turn Off Add 🔴" if ADD_ENABLED else "Turn On Add 🟢"
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"Add Feature: {status_text}", callback_data="noop")],
-                [InlineKeyboardButton(toggle_btn_text, callback_data="toggle_add")],
-                [InlineKeyboardButton("👤 User Chat", callback_data="admin_user_chat_btn")],
-                [InlineKeyboardButton("📢 Broadcast (/broadcast)", callback_data="admin_broadcast_btn")]
-            ])
-            await callback_query.message.edit_text("⚙️ **Admin Control Panel**", reply_markup=keyboard)
-            await callback_query.answer()
-            return
-
         if data == "noop":
             await callback_query.answer()
             return
@@ -545,7 +445,10 @@ async def main():
                 results = []
                 async for ch_message in userbot.search_messages(MY_CHANNEL, query=query_text):
                     if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                        title = ch_message.caption or (ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File"))
+                        raw_caption = ch_message.caption or ""
+                        fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
+                        
+                        title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
                         size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
                         size_str = get_readable_size(size_bytes)
                         results.append({"id": ch_message.id, "title": title, "size": size_str})
@@ -606,30 +509,50 @@ async def main():
             await callback_query.answer("📥 Sending file to PM...", show_alert=False)
             target_chat = user_id if is_pm else callback_query.message.chat.id
             try:
+                # Fetch original file caption from backup channel to clean it up
+                original_msg = await userbot.get_messages(MY_CHANNEL, file_msg_id)
+                raw_caption = original_msg.caption if original_msg else ""
+                fallback = original_msg.document.file_name if original_msg and original_msg.document else (original_msg.video.file_name if original_msg and original_msg.video else "Movie File")
+                
+                final_caption = clean_caption(raw_caption, fallback)
+                
+                # Custom keyboard with Admin Contact and Instagram buttons
+                file_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🤖 Admin Contact", url=ADMIN_BOT_LINK), InlineKeyboardButton("📸 Instagram", url=INSTAGRAM_LINK)]
+                ])
+
                 sent_file = await main_bot.copy_message(
                     chat_id=target_chat,
                     from_chat_id=MY_CHANNEL,
-                    message_id=file_msg_id
+                    message_id=file_msg_id,
+                    caption=final_caption,
+                    reply_markup=file_keyboard
                 )
                 
-                # ഫയൽ ഓട്ടോ-ഡിലീറ്റ് സമയം 10 മിനിറ്റായി (600 സെക്കൻഡ്) മാറ്റിയിരിക്കുന്നു
+                # Auto-delete time changed to 5 minutes (300 seconds)
                 warning_text = (
                     "⚠️ **Important Notice:**\n"
-                    "Due to copyright issues, this file will be **automatically deleted after 10 minutes (600 seconds)**.\n"
+                    "Due to copyright issues, this file will be **automatically deleted after 5 minutes (300 seconds)**.\n"
                     "📥 Please **forward this file** to your Saved Messages or personal channel immediately!\n\n"
-                    "👑 **Developer:** `Risham004`\n"
-                    "📸 **Instagram:** https://instagram.com/trollpanda.in"
+                    "👑 **Developer:** `Risham004`"
                 )
                 warning_msg = await main_bot.send_message(target_chat, warning_text)
 
                 async def auto_delete_files(file_msg, warn_msg):
-                    await asyncio.sleep(600)
+                    await asyncio.sleep(300)
                     try: await file_msg.delete()
                     except: pass
                     try: await warn_msg.delete()
                     except: pass
 
                 asyncio.create_task(auto_delete_files(sent_file, warning_msg))
+
+                # Delete the search inline button message after sending the file
+                try:
+                    if not is_pm:
+                        await callback_query.message.delete()
+                except:
+                    pass
 
             except Exception as e:
                 print(f"Send Error: {e}")
