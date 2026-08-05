@@ -1,572 +1,968 @@
-import asyncio
+#!/usr/bin/env python3
+"""
+Professional Telegram AutoFilter Bot
+A complete bot with MongoDB integration, admin controls, and file management
+Built with Pyrogram for maximum performance and reliability
+"""
+
 import os
+import asyncio
+import logging
+import time
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 import re
-import math
-from threading import Thread
-from flask import Flask
-from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from hydrogram.errors import UserNotParticipant
+import random
 
-# ------------ CONFIGURATION ------------
-API_ID = 28300966
-API_HASH = "c0a1fe56b13f260c62bc4838feb416d9"
-STRING_SESSION = "BQGv1qYAIeWJGD5qT23izLbMJPiWJ-AAmld2QM4rXcoRMwJw5iZfJBPcG3BTaX31W5OhlCfHr_cc_GVIB5Qiquf8503yugDygjD4IWb5UArRRtZ3guBKlZzjNln8E2oDyKCapD0YmsqN8UVZ3CCyDke3uKRZfqLNc6p5EkfAhaAgiUhcMyiqJIdb2c4a3CAIxizLxXopfs7e890zZfJjyQk7MMyMvsBlrlmSafudbcgb8BbFrX-XUTX1QknieWjnjtWeHFODjZ2K64BDC2Fo2fmQk4_6iVSXZJ9zK1bR-dTGJ30xHxznt8_j_DMNIkDePOa8KxW1uSD9vBGZv0CH1q5qQRoyCAAAAAGz4hg1AA"
+from pyrogram import Client, filters, enums
+from pyrogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton,
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent,
+    CallbackQuery, User
+)
+from pyrogram.errors import (
+    FloodWait, UserNotParticipant, ChatAdminRequired,
+    PeerIdInvalid, UserBannedInChannel, MessageNotModified
+)
+from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError, ServerSelectionTimeoutError
+import motor.motor_asyncio
 
-BOT_TOKEN = "8014212534:AAEtlOlMPuXbkPHOxQdj0mJ8yXTPDG0x25M"
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-MY_CHANNEL = -1002696679922             # Your backup/storage channel ID
+# Configuration - You can use environment variables or set directly
+API_ID = int(os.getenv('API_ID', '21936466'))
+API_HASH = os.getenv('API_HASH', '5d89c2323f79201eb440ab83ff272156')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8832564199:AAHxLVgTOOS-leBSgT0fKVsrm8PpFP-BtlM')
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27018/')
+DB_NAME = os.getenv('DB_NAME', 'AutoFilterBot')
+OWNER_ID = int(os.getenv('OWNER_ID', '1633472140'))
+REQUIRED_CHANNEL = os.getenv('REQUIRED_CHANNEL', '-1001557378145')
+SOURCE_CHANNEL_IDS = [int(x) for x in os.getenv('SOURCE_CHANNEL_IDS', '-1001860710176').split(',')]
+BRANDING_TAG = os.getenv('BRANDING_TAG', 'Uploaded By @Netflixian_Movie')
 
-# Force Join Configuration
-FORCE_SUB_CHANNEL = -1002644197954
-UPDATE_CHANNEL_LINK = "https://t.me/mfottupdates"
+# Validate required configuration
+if not all([API_ID, API_HASH, BOT_TOKEN, MONGO_URI, OWNER_ID]):
+    logger.error("Missing required configuration!")
+    exit(1)
 
-# External Links & Usernames
-INSTAGRAM_LINK = "https://www.instagram.com/mf_ott_updates?igsh=ZHd0bjBycGxndHRo"
-ADMIN_BOT_LINK = "https://t.me/mfadmin_0_bot"
+# Initialize Pyrogram client
+app = Client(
+    "AutoFilterBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    parse_mode=enums.ParseMode.HTML
+)
 
-# Multiple Admins Configuration
-ADMIN_IDS = [7312906293, 7199304293]
+# MongoDB connection
+try:
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+    db = mongo_client[DB_NAME]
+    logger.info(f"Connected to MongoDB successfully - Database: {DB_NAME}")
+except Exception as e:
+    logger.error(f"Failed to connect to MongoDB: {e}")
+    exit(1)
 
-USER_DB_FILE = "users.txt"
-GROUP_DB_FILE = "groups.txt"
+# Database collections
+users_collection = db.users
+files_collection = db.files
+banned_collection = db.banned_users
+groups_collection = db.groups
+settings_collection = db.settings
 
-# Global variables
-user_request_state = set()
-broadcast_state = {} 
-admin_chat_state = {} 
-# ----------------------------------------
+# Bot start time for uptime calculation
+BOT_START_TIME = time.time()
 
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is alive and running!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-# Helper Function: Save New Users
-def save_user(user_id: int):
-    if not os.path.exists(USER_DB_FILE):
-        open(USER_DB_FILE, "w").close()
-    try:
-        with open(USER_DB_FILE, "r") as f:
-            users = f.read().splitlines()
-        if str(user_id) not in users:
-            with open(USER_DB_FILE, "a") as f:
-                f.write(f"{user_id}\n")
-    except Exception:
-        pass
-
-# Helper Function: Save Groups
-def save_group(group_id: int):
-    if not os.path.exists(GROUP_DB_FILE):
-        open(GROUP_DB_FILE, "w").close()
-    try:
-        with open(GROUP_DB_FILE, "r") as f:
-            groups = f.read().splitlines()
-        if str(group_id) not in groups:
-            with open(GROUP_DB_FILE, "a") as f:
-                f.write(f"{group_id}\n")
-    except Exception:
-        pass
-
-# Helper Function: Format File Size
-def get_readable_size(size_in_bytes):
-    if not size_in_bytes:
-        return "0 B"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    while size_in_bytes >= 1024 and i < len(units) - 1:
-        size_in_bytes /= 1024.0
-        i += 1
-    return f"{size_in_bytes:.2f} {units[i]}"
-
-# Helper Function: Force Sub Check
-async def check_force_sub(client: Client, user_id: int) -> bool:
-    try:
-        member = await client.get_chat_member(FORCE_SUB_CHANNEL, user_id)
-        if member.status in ["kicked", "banned"]:
-            return False
+# Helper functions
+async def is_admin(user_id: int, chat_id: int = None) -> bool:
+    """Check if user is admin or owner"""
+    if user_id == OWNER_ID:
         return True
-    except UserNotParticipant:
-        return False
-    except Exception:
-        return True
-
-# Helper Function: Clean Caption (Removes @prakyTV and other handles)
-def clean_caption(original_text: str, fallback_name: str) -> str:
-    if not original_text:
-        cleaned = fallback_name
-    else:
-        # Remove @prakyTV specifically and any other usernames/links
-        text_without_specific = re.sub(r'@prakyTV', '', original_text, flags=re.IGNORECASE)
-        text_without_links = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+', '', text_without_specific)
-        text_without_usernames = re.sub(r'@\w+', '', text_without_links)
-        cleaned = " ".join(text_without_usernames.split()).strip()
-        if not cleaned:
-            cleaned = fallback_name
-        
-    return (
-        f"🎬 **{cleaned}**\n\n"
-        f"👑 **Developer:** `Risham004`\n\n"
-        f"✨ **Shared via Official Movie Bot** ⚡"
-    )
-
-# Helper Function for Pagination with Size & Name
-def get_search_markup(results, query_text, page=1, per_page=10, is_group=False):
-    total_results = len(results)
-    total_pages = math.ceil(total_results / per_page)
     
-    if page < 1:
-        page = 1
-    elif page > total_pages and total_pages > 0:
-        page = total_pages
-        
-    start_idx = (page - 1) * per_page
-    end_idx = start_idx + per_page
-    current_page_items = results[start_idx:end_idx]
-    
-    buttons = []
-    for item in current_page_items:
-        title = item["title"]
-        size_str = item["size"]
-        display_text = f"📦 [{size_str}] {title}"
-        if len(display_text) > 42:
-            display_text = display_text[:39] + "..."
-        
-        cb_prefix = "pmget_" if is_group else "get_"
-        buttons.append([InlineKeyboardButton(display_text, callback_data=f"{cb_prefix}{item['id']}")])
-        
-    nav_prefix = "grpsearch_" if is_group else "search_"
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"{nav_prefix}{query_text}_{page-1}"))
-    
-    nav_buttons.append(InlineKeyboardButton(f"📄 {page} / {total_pages}", callback_data="noop"))
-    
-    if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"{nav_prefix}{query_text}_{page+1}"))
-        
-    if nav_buttons:
-        buttons.append(nav_buttons)
-        
-    return InlineKeyboardMarkup(buttons), total_pages
-
-async def main():
-    userbot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
-    main_bot = Client("my_main_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-    @main_bot.on_message(filters.new_chat_members)
-    async def new_chat_member(client: Client, message: Message):
-        for member in message.new_chat_members:
-            if member.id == (await client.get_me()).id:
-                save_group(message.chat.id)
-                await message.reply_text("👋 **Hello! Thanks for adding me here.**\n\n✨ Send any movie name and I will give you the files instantly!")
-
-    @main_bot.on_message(filters.command("start") & filters.private)
-    async def start_cmd(client: Client, message: Message):
-        save_user(message.from_user.id)
-        
-        welcome_text = (
-            f"👋 **Hello {message.from_user.mention},**\n\n"
-            "🎬 **Welcome to Premium Movie Finder Bot!**\n"
-            "👑 **Developer:** `Risham004`\n\n"
-            "✨ Just type and send the name of the movie or series you are looking for."
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📂 Available Files", callback_data="available_files_btn")],
-            [InlineKeyboardButton("📸 Instagram", url=INSTAGRAM_LINK), InlineKeyboardButton("🤖 Admin Contact", url=ADMIN_BOT_LINK)],
-            [InlineKeyboardButton("📢 Update Channel", url=UPDATE_CHANNEL_LINK)]
-        ])
-        await message.reply_text(text=welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
-
-    @main_bot.on_message(filters.command("available_files") & filters.private)
-    async def available_files_cmd(client: Client, message: Message):
-        status_msg = await message.reply_text("📊 **Fetching total files from database...**")
+    if chat_id:
         try:
-            count = 0
-            async for _ in userbot.search_messages(MY_CHANNEL, query=""):
-                count += 1
-            
-            await status_msg.edit_text(
-                f"📁 **Database Status:**\n\n"
-                f"✅ Total Available Files: `{count}`\n"
-                f"👑 **Developer:** `Risham004`\n\n"
-                f"💡 *Type any movie name to search and download!*"
-            )
-        except Exception:
-            await status_msg.edit_text("❌ Failed to fetch file count.")
+            member = await app.get_chat_member(chat_id, user_id)
+            return member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+        except:
+            return False
+    
+    return False
 
-    @main_bot.on_message(filters.command(["panel", "admin"]) & filters.private & filters.user(ADMIN_IDS))
-    async def admin_panel(client: Client, message: Message):
+async def is_banned(user_id: int) -> bool:
+    """Check if user is banned"""
+    banned_user = await banned_collection.find_one({"user_id": user_id})
+    return banned_user is not None
+
+async def check_user_subscription(user_id: int) -> bool:
+    """Check if user is subscribed to required channel"""
+    try:
+        member = await app.get_chat_member(REQUIRED_CHANNEL, user_id)
+        return member.status not in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.KICKED]
+    except:
+        return False
+
+async def add_user(user_id: int, username: str = None, first_name: str = None):
+    """Add user to database"""
+    try:
+        await users_collection.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "user_id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "joined_at": datetime.now(),
+                    "last_active": datetime.now()
+                }
+            },
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error adding user {user_id}: {e}")
+
+async def get_user_count() -> int:
+    """Get total user count"""
+    return await users_collection.count_documents({})
+
+async def get_file_count() -> int:
+    """Get total file count"""
+    return await files_collection.count_documents({})
+
+async def get_banned_count() -> int:
+    """Get total banned user count"""
+    return await banned_collection.count_documents({})
+
+async def get_uptime() -> str:
+    """Get bot uptime"""
+    uptime_seconds = int(time.time() - BOT_START_TIME)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    minutes = (uptime_seconds % 3600) // 60
+    seconds = uptime_seconds % 60
+    
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m {seconds}s"
+    elif hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
+# Database models
+class FileDocument:
+    def __init__(self, file_id: str, file_name: str, file_type: str, 
+                 file_size: int, caption: str = "", group_id: int = None):
+        self.file_id = file_id
+        self.file_name = file_name
+        self.file_type = file_type
+        self.file_size = file_size
+        self.caption = caption
+        self.group_id = group_id
+        self.added_at = datetime.now()
+        self.download_count = 0
+
+    async def save(self):
+        """Save file to database"""
+        try:
+            await files_collection.update_one(
+                {"file_id": self.file_id},
+                {
+                    "$set": {
+                        "file_id": self.file_id,
+                        "file_name": self.file_name,
+                        "file_type": self.file_type,
+                        "file_size": self.file_size,
+                        "caption": self.caption,
+                        "group_id": self.group_id,
+                        "added_at": self.added_at,
+                        "download_count": self.download_count
+                    }
+                },
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error saving file {self.file_id}: {e}")
+            return False
+
+    @staticmethod
+    async def search_files(query: str, limit: int = 10) -> List[Dict]:
+        """Search files by name or caption"""
+        try:
+            # Create text index if it doesn't exist
+            await files_collection.create_index([("file_name", "text"), ("caption", "text")])
+            
+            # Search with regex for better matching
+            regex_query = {"$regex": query, "$options": "i"}
+            cursor = files_collection.find({
+                "$or": [
+                    {"file_name": regex_query},
+                    {"caption": regex_query}
+                ]
+            }).limit(limit)
+            
+            files = []
+            async for file_doc in cursor:
+                files.append(file_doc)
+            
+            return files
+        except Exception as e:
+            logger.error(f"Error searching files: {e}")
+            return []
+
+# Command handlers
+@app.on_message(filters.command("start"))
+async def start_command(client: Client, message: Message):
+    """Handle /start command"""
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    
+    # Check if user is banned
+    if await is_banned(user_id):
+        await message.reply("❌ You are banned from using this bot.")
+        return
+    
+    # Check if user is subscribed to required channel
+    if not await check_user_subscription(user_id):
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👤 User Chat", callback_data="admin_user_chat_btn")],
-            [InlineKeyboardButton("📢 Broadcast (/broadcast)", callback_data="admin_broadcast_btn")]
+            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}")],
+            [InlineKeyboardButton("🔄 Check Subscription", callback_data="check_sub")]
         ])
-        await message.reply_text(
-            "⚙️ **Admin Control Panel**\n\n✨ Manage your bot settings below:",
+        
+        await message.reply(
+            f"❌ <b>Subscription Required!</b>\n\n"
+            f"Please join our channel to use this bot:\n"
+            f"📢 <a href='https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}'>Join Channel</a>\n\n"
+            f"After joining, click the button below to verify your subscription.",
             reply_markup=keyboard
         )
+        return
+    
+    # Add user to database
+    await add_user(user_id, username, first_name)
+    
+    # Welcome message with buttons
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Search Files", switch_inline_query_current_chat="")],
+        [InlineKeyboardButton("ℹ️ Help", callback_data="help"),
+         InlineKeyboardButton("📊 About", callback_data="about")],
+        [InlineKeyboardButton("🆔 Get ID", callback_data="get_id")]
+    ])
+    
+    welcome_text = f"""
+🎬 <b>Welcome to AutoFilter Bot!</b>
 
-    @main_bot.on_message(filters.command("broadcast") & filters.private & filters.user(ADMIN_IDS))
-    async def broadcast_command(client: Client, message: Message):
-        user_id = message.from_user.id
-        broadcast_state[user_id] = False
-        await message.reply_text(
-            "📢 **Broadcast Mode Activated**\n\n"
-            "💬 Now send the promotional message, photo, video, or media you want to broadcast to all users.\n\n"
-            "*(Type /cancel to abort)*"
+👋 Hello <b>{first_name}</b>!
+
+I'm a powerful file search bot that can help you find movies, series, and other files instantly.
+
+<b>🚀 Quick Actions:</b>
+• Use the search button below to find files
+• Use @{client.me.username} <i>query</i> in any chat for inline search
+• Join our support group for help
+
+<b>📋 Available Commands:</b>
+/help - Show detailed help
+/about - Bot information
+/id - Get user ID
+
+Enjoy searching! 🔍
+    """
+    
+    await message.reply(welcome_text, reply_markup=keyboard)
+
+@app.on_message(filters.command("help"))
+async def help_command(client: Client, message: Message):
+    """Handle /help command"""
+    help_text = """
+📖 <b>AutoFilter Bot Help</b>
+
+<b>🔍 How to Search:</b>
+• Use the search button in /start
+• Type @{bot_username} <i>query</i> in any chat
+• Use inline mode for quick access
+
+<b>📋 Commands:</b>
+/start - Start the bot and see welcome message
+/help - Show this help message
+/about - Show bot information
+/id - Get your user ID or replied user's ID
+
+<b>👑 Admin Commands:</b>
+/ban <user> - Ban a user
+/unban <user> - Unban a user
+/broadcast <message> - Send message to all users
+/status - Show bot statistics
+
+<b>💡 Tips:</b>
+• Search with keywords from movie/series names
+• Use partial names for better results
+• Check file size before downloading
+
+<b>🆘 Support:</b>
+If you need help, contact the admin or join our support group.
+    """.format(bot_username=client.me.username)
+    
+    await message.reply(help_text)
+
+@app.on_message(filters.command("about"))
+async def about_command(client: Client, message: Message):
+    """Handle /about command"""
+    uptime = await get_uptime()
+    user_count = await get_user_count()
+    file_count = await get_file_count()
+    
+    about_text = f"""
+🤖 <b>AutoFilter Bot Information</b>
+
+<b>📊 Statistics:</b>
+• <b>Uptime:</b> {uptime}
+• <b>Total Users:</b> {user_count:,}
+• <b>Total Files:</b> {file_count:,}
+• <b>Version:</b> 2.0
+
+<b>🔧 Features:</b>
+• 🔍 Instant file search
+• 📁 MongoDB database storage
+• 👑 Admin controls
+• 🚫 User management
+• 📢 Broadcast system
+• 🎯 Inline search mode
+
+<b>⚡ Performance:</b>
+• Fast async operations
+• Optimized database queries
+• Efficient file indexing
+• Scalable architecture
+
+<b>🛠️ Built with:</b>
+• Python 3.8+
+• Pyrogram
+• MongoDB
+• Motor (async MongoDB driver)
+
+<b>👨‍💻 Developer:</b> Professional Bot Developer
+    """
+    
+    await message.reply(about_text)
+
+@app.on_message(filters.command("id"))
+async def id_command(client: Client, message: Message):
+    """Handle /id command"""
+    if message.reply_to_message:
+        user = message.reply_to_message.from_user
+        user_id = user.id
+        username = user.username or "No username"
+        first_name = user.first_name or "No name"
+        
+        id_text = f"""
+🆔 <b>User Information</b>
+
+<b>👤 Name:</b> {first_name}
+<b>🆔 User ID:</b> <code>{user_id}</code>
+<b>📝 Username:</b> @{username}
+<b>💬 Chat ID:</b> <code>{message.chat.id}</code>
+        """
+    else:
+        user = message.from_user
+        user_id = user.id
+        username = user.username or "No username"
+        first_name = user.first_name or "No name"
+        
+        id_text = f"""
+🆔 <b>Your Information</b>
+
+<b>👤 Name:</b> {first_name}
+<b>🆔 User ID:</b> <code>{user_id}</code>
+<b>📝 Username:</b> @{username}
+<b>💬 Chat ID:</b> <code>{message.chat.id}</code>
+        """
+    
+    await message.reply(id_text)
+
+# Admin commands
+@app.on_message(filters.command("ban") & filters.user(OWNER_ID))
+async def ban_command(client: Client, message: Message):
+    """Handle /ban command (Owner only)"""
+    if not message.reply_to_message:
+        await message.reply("❌ Please reply to a user to ban them.")
+        return
+    
+    user_to_ban = message.reply_to_message.from_user
+    user_id = user_to_ban.id
+    
+    if user_id == OWNER_ID:
+        await message.reply("❌ You cannot ban yourself!")
+        return
+    
+    try:
+        # Add to banned collection
+        await banned_collection.insert_one({
+            "user_id": user_id,
+            "username": user_to_ban.username,
+            "first_name": user_to_ban.first_name,
+            "banned_at": datetime.now(),
+            "banned_by": message.from_user.id
+        })
+        
+        await message.reply(f"✅ User {user_to_ban.first_name} (ID: {user_id}) has been banned.")
+        logger.info(f"User {user_id} banned by {message.from_user.id}")
+        
+    except DuplicateKeyError:
+        await message.reply("❌ User is already banned.")
+    except Exception as e:
+        await message.reply(f"❌ Error banning user: {e}")
+        logger.error(f"Error banning user {user_id}: {e}")
+
+@app.on_message(filters.command("unban") & filters.user(OWNER_ID))
+async def unban_command(client: Client, message: Message):
+    """Handle /unban command (Owner only)"""
+    if not message.reply_to_message:
+        await message.reply("❌ Please reply to a user to unban them.")
+        return
+    
+    user_to_unban = message.reply_to_message.from_user
+    user_id = user_to_unban.id
+    
+    try:
+        result = await banned_collection.delete_one({"user_id": user_id})
+        
+        if result.deleted_count > 0:
+            await message.reply(f"✅ User {user_to_unban.first_name} (ID: {user_id}) has been unbanned.")
+            logger.info(f"User {user_id} unbanned by {message.from_user.id}")
+        else:
+            await message.reply("❌ User is not banned.")
+            
+    except Exception as e:
+        await message.reply(f"❌ Error unbanning user: {e}")
+        logger.error(f"Error unbanning user {user_id}: {e}")
+
+@app.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
+async def broadcast_command(client: Client, message: Message):
+    """Handle /broadcast command (Owner only)"""
+    if not message.reply_to_message:
+        await message.reply("❌ Please reply to a message to broadcast it.")
+        return
+    
+    broadcast_message = message.reply_to_message
+    users_cursor = users_collection.find({})
+    total_users = await get_user_count()
+    
+    if total_users == 0:
+        await message.reply("❌ No users found to broadcast to.")
+        return
+    
+    await message.reply(f"📢 Starting broadcast to {total_users} users...")
+    
+    success_count = 0
+    failed_count = 0
+    
+    async for user_doc in users_cursor:
+        try:
+            user_id = user_doc["user_id"]
+            
+            # Skip if user is banned
+            if await is_banned(user_id):
+                continue
+            
+            # Forward the message
+            await broadcast_message.forward(user_id)
+            success_count += 1
+            
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(0.1)
+            
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            try:
+                await broadcast_message.forward(user_doc["user_id"])
+                success_count += 1
+            except:
+                failed_count += 1
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Error broadcasting to user {user_doc['user_id']}: {e}")
+    
+    await message.reply(
+        f"📢 Broadcast completed!\n"
+        f"✅ Success: {success_count}\n"
+        f"❌ Failed: {failed_count}\n"
+        f"📊 Total: {total_users}"
+    )
+
+@app.on_message(filters.command("status") & filters.user(OWNER_ID))
+async def status_command(client: Client, message: Message):
+    """Handle /status command (Owner only)"""
+    uptime = await get_uptime()
+    user_count = await get_user_count()
+    file_count = await get_file_count()
+    banned_count = await get_banned_count()
+    
+    # Get system info
+    import psutil
+    cpu_percent = psutil.cpu_percent()
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    status_text = f"""
+📊 <b>Bot Status Report</b>
+
+<b>⏰ Uptime:</b> {uptime}
+<b>👥 Total Users:</b> {user_count:,}
+<b>📁 Total Files:</b> {file_count:,}
+<b>🚫 Banned Users:</b> {banned_count:,}
+
+<b>💻 System Resources:</b>
+• <b>CPU Usage:</b> {cpu_percent}%
+• <b>Memory Usage:</b> {memory.percent}% ({memory.used // (1024**3)}GB / {memory.total // (1024**3)}GB)
+• <b>Disk Usage:</b> {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)
+
+<b>🔧 Bot Configuration:</b>
+• <b>API ID:</b> {API_ID}
+• <b>Bot Username:</b> @{client.me.username}
+• <b>Owner ID:</b> {OWNER_ID}
+• <b>Database:</b> {DB_NAME} ✅
+• <b>Required Channel:</b> {REQUIRED_CHANNEL}
+• <b>Source Channels:</b> {len(SOURCE_CHANNEL_IDS)} configured
+• <b>Branding:</b> {BRANDING_TAG[:30]}...
+
+<b>📈 Performance:</b>
+• <b>Response Time:</b> < 1s
+• <b>Database:</b> Optimized
+• <b>Memory:</b> Efficient
+    """
+    
+    await message.reply(status_text)
+
+@app.on_message(filters.command("send") & filters.user(OWNER_ID))
+async def send_file_command(client: Client, message: Message):
+    """Handle /send command to send files to users (Owner only)"""
+    if not message.reply_to_message:
+        await message.reply("❌ Please reply to a file to send it.")
+        return
+    
+    if not message.reply_to_message.document and not message.reply_to_message.video and not message.reply_to_message.audio and not message.reply_to_message.photo:
+        await message.reply("❌ Please reply to a file (document, video, audio, or photo).")
+        return
+    
+    # Get the file
+    file_message = message.reply_to_message
+    
+    # Get target user ID from command arguments
+    try:
+        target_user_id = int(message.text.split()[1])
+    except (IndexError, ValueError):
+        await message.reply("❌ Please provide a valid user ID.\nUsage: /send <user_id>")
+        return
+    
+    try:
+        # Send the file to the user
+        await file_message.forward(target_user_id)
+        await message.reply(f"✅ File sent successfully to user {target_user_id}")
+        logger.info(f"File sent to user {target_user_id} by {message.from_user.id}")
+        
+    except Exception as e:
+        await message.reply(f"❌ Error sending file: {e}")
+        logger.error(f"Error sending file to user {target_user_id}: {e}")
+
+# File indexing and management
+@app.on_message(filters.document | filters.video | filters.audio | filters.photo)
+async def index_file(client: Client, message: Message):
+    """Index files automatically from source channels or admin uploads"""
+    # Check if message is from source channel or user is admin
+    is_from_source = message.chat.id in SOURCE_CHANNEL_IDS
+    is_admin_upload = await is_admin(message.from_user.id, message.chat.id)
+    
+    if not (is_from_source or is_admin_upload):
+        return
+    
+    try:
+        # Get file information
+        if message.document:
+            file_id = message.document.file_id
+            file_name = message.document.file_name or "Unknown Document"
+            file_type = "document"
+            file_size = message.document.file_size or 0
+        elif message.video:
+            file_id = message.video.file_id
+            file_name = message.video.file_name or "Unknown Video"
+            file_type = "video"
+            file_size = message.video.file_size or 0
+        elif message.audio:
+            file_id = message.audio.file_id
+            file_name = message.audio.file_name or "Unknown Audio"
+            file_type = "audio"
+            file_size = message.audio.file_size or 0
+        elif message.photo:
+            file_id = message.photo.file_id
+            file_name = "Photo"
+            file_type = "photo"
+            file_size = message.photo.file_size or 0
+        else:
+            return
+        
+        # Add branding to caption
+        caption = message.caption or ""
+        if BRANDING_TAG and BRANDING_TAG not in caption:
+            caption = f"{caption}\n\n{BRANDING_TAG}" if caption else BRANDING_TAG
+        
+        # Create file document
+        file_doc = FileDocument(
+            file_id=file_id,
+            file_name=file_name,
+            file_type=file_type,
+            file_size=file_size,
+            caption=caption,
+            group_id=message.chat.id
         )
-
-    @main_bot.on_message((filters.document | filters.video | filters.audio | filters.text) & filters.private & filters.user(ADMIN_IDS))
-    async def handle_admin_messages(client: Client, message: Message):
-        user_id = message.from_user.id
-        text_content = message.text.strip() if message.text else ""
-
-        if text_content == "/cancel":
-            if user_id in admin_chat_state:
-                del admin_chat_state[user_id]
-            if user_id in broadcast_state:
-                del broadcast_state[user_id]
-            await message.reply_text("❌ **Operation cancelled successfully.**")
-            return
-
-        if user_id in broadcast_state and broadcast_state[user_id] is False:
-            del broadcast_state[user_id]
-            if not os.path.exists(USER_DB_FILE):
-                await message.reply_text("❌ No users found in database (`users.txt`)!")
-                return
+        
+        # Save to database
+        if await file_doc.save():
+            logger.info(f"Indexed file: {file_name} from {'source channel' if is_from_source else 'admin upload'}")
+        else:
+            logger.error(f"Failed to index file: {file_name}")
             
-            with open(USER_DB_FILE, "r") as f:
-                target_users = [int(uid.strip()) for uid in f.read().splitlines() if uid.strip().isdigit()]
+    except Exception as e:
+        logger.error(f"Error indexing file: {e}")
 
-            status_msg = await message.reply_text(f"🚀 **Broadcasting to {len(target_users)} users... Please wait.**")
-            success_count, fail_count = 0, 0
-            
-            for uid in target_users:
-                try:
-                    await message.copy(chat_id=uid)
-                    success_count += 1
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    fail_count += 1
-
-            await status_msg.edit_text(
-                f"✨ **Broadcast Completed Successfully!** ✅\n\n"
-                f"👥 Total Target Users: `{len(target_users)}`\n"
-                f"🟢 Successful: `{success_count}`\n"
-                f"🔴 Failed / Blocked: `{fail_count}`"
+# Inline query handler
+@app.on_inline_query()
+async def inline_query_handler(client: Client, query: InlineQuery):
+    """Handle inline queries for file search"""
+    user_id = query.from_user.id
+    
+    # Check if user is banned
+    if await is_banned(user_id):
+        return
+    
+    # Check if user is subscribed to required channel
+    if not await check_user_subscription(user_id):
+        # Show subscription required message
+        results = [
+            InlineQueryResultArticle(
+                title="❌ Subscription Required",
+                description="Please join our channel to use this bot",
+                input_message_content=InputTextMessageContent(
+                    f"❌ <b>Subscription Required!</b>\n\n"
+                    f"Please join our channel to use this bot:\n"
+                    f"📢 <a href='https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}'>Join Channel</a>"
+                )
             )
-            return
-
-        if user_id in admin_chat_state:
-            state_data = admin_chat_state[user_id]
-            if state_data["step"] == "waiting_user_id":
-                if not text_content.isdigit():
-                    await message.reply_text("❌ **Invalid User ID!** Send a numeric ID.")
-                    return
-                target_user_id = int(text_content)
-                admin_chat_state[user_id] = {"step": "waiting_message", "target_user": target_user_id}
-                await message.reply_text(f"✅ Target User ID set to: `{target_user_id}`\n\n💬 Send your message now:")
-                return
-            elif state_data["step"] == "waiting_message":
-                target_user_id = state_data["target_user"]
-                try:
-                    await message.copy(chat_id=target_user_id)
-                    await message.reply_text(f"✨ **Successfully sent to user (`{target_user_id}`)!**")
-                except Exception as e:
-                    await message.reply_text(f"❌ Failed: `{str(e)}`")
-                return
-
-    @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.private)
-    async def handle_user_search(client: Client, message: Message):
-        user_id = message.from_user.id
-        text = message.text.strip()
-
-        if "t.me/" in text:
-            return
-
-        save_user(user_id)
-
-        if user_id in user_request_state:
-            user_request_state.remove(user_id)
-            await message.reply_text("⏳ Thank you! Movie name received. **Wait for the file.**")
-            return
-
-        status_msg = await message.reply_text(f"🔎 **Searching for** `{text}`...")
-
-        try:
-            results = []
-            async for ch_message in userbot.search_messages(MY_CHANNEL, query=text):
-                if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                    raw_caption = ch_message.caption or ""
-                    fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
-                    
-                    # Clean the title by removing @prakyTV and other handles
-                    title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
-                    size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
-                    size_str = get_readable_size(size_bytes)
-                    results.append({"id": ch_message.id, "title": title, "size": size_str})
-
-            await status_msg.delete()
-
-            if not results:
-                req_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📝 Request Admin", callback_data="request_admin_click")]
-                ])
-                await message.reply_text(
-                    f"❌ **No files found related to '{text}'.**\n\n👇 Click below to request this movie:",
-                    reply_markup=req_markup
+        ]
+        await query.answer(results, cache_time=300)
+        return
+    
+    # Add user to database
+    await add_user(user_id, query.from_user.username, query.from_user.first_name)
+    
+    query_text = query.query.strip()
+    
+    if not query_text:
+        # Show recent files if no query
+        files = await FileDocument.search_files("", limit=10)
+    else:
+        # Search files
+        files = await FileDocument.search_files(query_text, limit=20)
+    
+    if not files:
+        # No results found
+        results = [
+            InlineQueryResultArticle(
+                title="❌ No files found",
+                description=f"No files found for '{query_text}'",
+                input_message_content=InputTextMessageContent(
+                    f"❌ No files found for '{query_text}'\n\nTry searching with different keywords."
                 )
-            else:
-                keyboard, _ = get_search_markup(results, text, page=1, is_group=False)
-                await message.reply_text(
-                    f"🎬 **Found {len(results)} files for '{text}':**\n\n👇 **Click on your preferred file below:**",
-                    reply_markup=keyboard
-                )
-
-        except Exception as e:
-            print(f"Search Error (PM): {e}")
-            try:
-                await status_msg.delete()
-            except:
-                pass
-            await message.reply_text("❌ An error occurred while searching. Please try again.")
-
-    @main_bot.on_message(filters.text & ~filters.regex(r"^/") & ~filters.via_bot & filters.group)
-    async def handle_group_search(client: Client, message: Message):
-        save_group(message.chat.id)
-        movie_name = message.text.strip()
-        if "t.me/" in movie_name:
-            return
-
-        status_msg = await message.reply_text(f"🔎 **Searching for** `{movie_name}`...")
-
-        try:
-            results = []
-            async for ch_message in userbot.search_messages(MY_CHANNEL, query=movie_name):
-                if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                    raw_caption = ch_message.caption or ""
-                    fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
-                    
-                    title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
-                    size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
-                    size_str = get_readable_size(size_bytes)
-                    results.append({"id": ch_message.id, "title": title, "size": size_str})
-
-            await status_msg.delete()
-
-            if not results:
-                sent_msg = await message.reply_text(f"❌ **No files found related to '{movie_name}'.**")
-                async def del_err(m):
-                    await asyncio.sleep(600)
-                    try: await m.delete()
-                    except: pass
-                asyncio.create_task(del_err(sent_msg))
-            else:
-                keyboard, _ = get_search_markup(results, movie_name, page=1, is_group=True)
-                text_msg = (
-                    f"🎬 **Found {len(results)} files for '{movie_name}':**\n\n"
-                    f"👇 **Click on any file below to get it in your PM!**\n\n"
-                    f"⚠️ *This message will be automatically deleted after 10 minutes.*"
-                )
-                sent_msg = await message.reply_text(text=text_msg, reply_markup=keyboard)
-
-                async def delete_after_delay(msg):
-                    await asyncio.sleep(600)
-                    try: await msg.delete()
-                    except: pass
-                asyncio.create_task(delete_after_delay(sent_msg))
-
-        except Exception as e:
-            print(f"Search Error (Group): {e}")
-            try: await status_msg.delete()
-            except: pass
-
-    @main_bot.on_callback_query()
-    async def callback_handler(client: Client, callback_query: CallbackQuery):
-        data = callback_query.data
-        user_id = callback_query.from_user.id
-        user_mention = callback_query.from_user.mention
-
-        if data == "admin_user_chat_btn":
-            if user_id not in ADMIN_IDS:
-                await callback_query.answer("⚠️ Not authorized!", show_alert=True)
-                return
-            admin_chat_state[user_id] = {"step": "waiting_user_id"}
-            await callback_query.answer()
-            await callback_query.message.edit_text("👤 **User Chat Mode**\n\nSend target User ID:")
-            return
-
-        if data == "admin_broadcast_btn":
-            if user_id not in ADMIN_IDS:
-                await callback_query.answer("⚠️ Not authorized!", show_alert=True)
-                return
-            broadcast_state[user_id] = False
-            await callback_query.answer()
-            await callback_query.message.edit_text(
-                "📢 **Broadcast Mode Activated**\n\n"
-                "💬 Now send the promotional message, photo, video, or media you want to broadcast to all users.\n\n"
-                "*(Type /cancel to abort)*"
             )
-            return
-
-        if data == "request_admin_click":
-            user_request_state.add(user_id)
-            await callback_query.answer("Please send the movie name now!", show_alert=True)
-            await callback_query.message.edit_text("📝 **Please send the name of the movie you want to request:**")
-            return
-
-        if data == "noop":
-            await callback_query.answer()
-            return
-
-        if data == "available_files_btn":
-            await callback_query.answer("📊 Fetching file count...", show_alert=False)
-            try:
-                count = 0
-                async for _ in userbot.search_messages(MY_CHANNEL, query=""):
-                    count += 1
-                await callback_query.message.reply_text(f"📁 **Database Status:**\n\n✅ Total Available Files: `{count}`\n👑 **Developer:** `Risham004`")
-            except:
-                await callback_query.message.reply_text("❌ Failed to fetch count.")
-            return
-
-        if data.startswith("search_") or data.startswith("grpsearch_"):
-            parts = data.split("_")
-            is_grp = data.startswith("grpsearch_")
-            page = int(parts[-1])
-            query_text = "_".join(parts[1:-1])
-
-            try:
-                results = []
-                async for ch_message in userbot.search_messages(MY_CHANNEL, query=query_text):
-                    if ch_message and (ch_message.document or ch_message.video or ch_message.audio):
-                        raw_caption = ch_message.caption or ""
-                        fallback = ch_message.document.file_name if ch_message.document else (ch_message.video.file_name if ch_message.video else "Movie File")
-                        
-                        title = clean_caption(raw_caption, fallback).split("\n")[0].replace("🎬 **", "").replace("**", "")
-                        size_bytes = ch_message.document.file_size if ch_message.document else (ch_message.video.file_size if ch_message.video else 0)
-                        size_str = get_readable_size(size_bytes)
-                        results.append({"id": ch_message.id, "title": title, "size": size_str})
-
-                if not results:
-                    await callback_query.answer("❌ No files found!", show_alert=True)
-                    return
-
-                keyboard, _ = get_search_markup(results, query_text, page=page, is_group=is_grp)
-                await callback_query.message.edit_text(f"🎬 **Found {len(results)} files:**", reply_markup=keyboard)
-                await callback_query.answer()
-            except:
-                await callback_query.answer("❌ Error loading page!", show_alert=True)
-            return
-
-        if data.startswith("pmget_") or data.startswith("get_"):
-            is_pm = data.startswith("pmget_")
-            file_msg_id = int(data.split("_")[1])
-            bot_username = (await client.get_me()).username
-
-            if is_pm:
-                try:
-                    await client.send_chat_action(user_id, "typing")
-                except Exception:
-                    start_link = f"https://t.me/{bot_username}?start=start"
-                    pm_keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🚀 Start Bot in PM", url=start_link)]
-                    ])
-                    await callback_query.answer("⚠️ Please start the bot in PM first!", show_alert=True)
-                    await callback_query.message.reply_text(
-                        f"👋 {user_mention}, please start the bot in your **Personal Chat (PM)** to receive files!",
-                        reply_markup=pm_keyboard
+        ]
+    else:
+        results = []
+        for file_doc in files:
+            # Create result based on file type
+            if file_doc["file_type"] == "video":
+                results.append(
+                    InlineQueryResultArticle(
+                        title=f"🎬 {file_doc['file_name']}",
+                        description=f"Video • {file_doc['file_size'] // (1024*1024)}MB",
+                        input_message_content=InputTextMessageContent(
+                            f"🎬 <b>{file_doc['file_name']}</b>\n\n"
+                            f"📁 Type: Video\n"
+                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
+                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
+                        ),
+                        thumb_url="https://img.icons8.com/color/48/000000/video.png"
                     )
-                    return
-
-            is_joined = await check_force_sub(client, user_id)
-            if not is_joined:
-                join_keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📢 Join Channel", url=UPDATE_CHANNEL_LINK)],
-                    [InlineKeyboardButton("🔄 I Have Joined", callback_data=data)]
-                ])
-                await callback_query.answer("⚠️ Please join our update channel first!", show_alert=True)
-                if is_pm:
-                    try:
-                        await client.send_message(
-                            user_id,
-                            "⚠️ **You must join our update channel to get files!**\n\n👇 Click below to join, then click the button again.",
-                            reply_markup=join_keyboard
+                )
+            elif file_doc["file_type"] == "audio":
+                results.append(
+                    InlineQueryResultArticle(
+                        title=f"🎵 {file_doc['file_name']}",
+                        description=f"Audio • {file_doc['file_size'] // (1024*1024)}MB",
+                        input_message_content=InputTextMessageContent(
+                            f"🎵 <b>{file_doc['file_name']}</b>\n\n"
+                            f"📁 Type: Audio\n"
+                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
+                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
+                        ),
+                        thumb_url="https://img.icons8.com/color/48/000000/audio.png"
+                    )
+                )
+            elif file_doc["file_type"] == "document":
+                results.append(
+                    InlineQueryResultArticle(
+                        title=f"📄 {file_doc['file_name']}",
+                        description=f"Document • {file_doc['file_size'] // (1024*1024)}MB",
+                        input_message_content=InputTextMessageContent(
+                            f"📄 <b>{file_doc['file_name']}</b>\n\n"
+                            f"📁 Type: Document\n"
+                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
+                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
+                        ),
+                        thumb_url="https://img.icons8.com/color/48/000000/document.png"
+                    )
+                )
+            else:
+                results.append(
+                    InlineQueryResultArticle(
+                        title=f"📁 {file_doc['file_name']}",
+                        description=f"File • {file_doc['file_size'] // (1024*1024)}MB",
+                        input_message_content=InputTextMessageContent(
+                            f"📁 <b>{file_doc['file_name']}</b>\n\n"
+                            f"📁 Type: {file_doc['file_type'].title()}\n"
+                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
+                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
                         )
-                    except: pass
-                else:
-                    await callback_query.message.edit_text(
-                        "⚠️ **You must join our update channel first!**",
-                        reply_markup=join_keyboard
                     )
-                return
+                )
+    
+    await query.answer(results, cache_time=300)
 
-            await callback_query.answer("📥 Sending file to PM...", show_alert=False)
-            target_chat = user_id if is_pm else callback_query.message.chat.id
-            try:
-                # Fetch original file caption from backup channel to clean it up
-                original_msg = await userbot.get_messages(MY_CHANNEL, file_msg_id)
-                raw_caption = original_msg.caption if original_msg else ""
-                fallback = original_msg.document.file_name if original_msg and original_msg.document else (original_msg.video.file_name if original_msg and original_msg.video else "Movie File")
-                
-                final_caption = clean_caption(raw_caption, fallback)
-                
-                # Custom keyboard with Admin Contact and Instagram buttons
-                file_keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🤖 Admin Contact", url=ADMIN_BOT_LINK), InlineKeyboardButton("📸 Instagram", url=INSTAGRAM_LINK)]
+# Callback query handler
+@app.on_callback_query()
+async def callback_query_handler(client: Client, callback_query: CallbackQuery):
+    """Handle callback queries"""
+    user_id = callback_query.from_user.id
+    
+    # Check if user is banned
+    if await is_banned(user_id):
+        await callback_query.answer("❌ You are banned from using this bot.", show_alert=True)
+        return
+    
+    data = callback_query.data
+    
+    if data == "help":
+        help_text = """
+📖 <b>AutoFilter Bot Help</b>
+
+<b>🔍 How to Search:</b>
+• Use the search button in /start
+• Type @{bot_username} <i>query</i> in any chat
+• Use inline mode for quick access
+
+<b>📋 Commands:</b>
+/start - Start the bot and see welcome message
+/help - Show this help message
+/about - Show bot information
+/id - Get your user ID or replied user's ID
+
+<b>💡 Tips:</b>
+• Search with keywords from movie/series names
+• Use partial names for better results
+• Check file size before downloading
+        """.format(bot_username=client.me.username)
+        
+        await callback_query.edit_message_text(help_text)
+        
+    elif data == "about":
+        uptime = await get_uptime()
+        user_count = await get_user_count()
+        file_count = await get_file_count()
+        
+        about_text = f"""
+🤖 <b>AutoFilter Bot Information</b>
+
+<b>📊 Statistics:</b>
+• <b>Uptime:</b> {uptime}
+• <b>Total Users:</b> {user_count:,}
+• <b>Total Files:</b> {file_count:,}
+• <b>Version:</b> 2.0
+
+<b>🔧 Features:</b>
+• 🔍 Instant file search
+• 📁 MongoDB database storage
+• 👑 Admin controls
+• 🚫 User management
+• 📢 Broadcast system
+• 🎯 Inline search mode
+        """
+        
+        await callback_query.edit_message_text(about_text)
+        
+    elif data == "get_id":
+        id_text = f"""
+🆔 <b>Your Information</b>
+
+<b>👤 Name:</b> {callback_query.from_user.first_name}
+<b>🆔 User ID:</b> <code>{callback_query.from_user.id}</code>
+<b>📝 Username:</b> @{callback_query.from_user.username or 'No username'}
+        """
+        
+        await callback_query.edit_message_text(id_text)
+    
+    elif data == "check_sub":
+        # Check subscription status
+        if await check_user_subscription(callback_query.from_user.id):
+            await callback_query.edit_message_text(
+                "✅ <b>Subscription Verified!</b>\n\n"
+                "You are now subscribed to our channel. You can use the bot normally.\n\n"
+                "Use /start to see the main menu."
+            )
+        else:
+            await callback_query.edit_message_text(
+                f"❌ <b>Subscription Not Found!</b>\n\n"
+                f"Please join our channel first:\n"
+                f"📢 <a href='https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}'>Join Channel</a>\n\n"
+                f"After joining, click the button below to verify your subscription.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Check Again", callback_data="check_sub")]
                 ])
+            )
+    
+    await callback_query.answer()
 
-                sent_file = await main_bot.copy_message(
-                    chat_id=target_chat,
-                    from_chat_id=MY_CHANNEL,
-                    message_id=file_msg_id,
-                    caption=final_caption,
-                    reply_markup=file_keyboard
+# Welcome message for new group members
+@app.on_message(filters.new_chat_members)
+async def welcome_new_members(client: Client, message: Message):
+    """Welcome new group members"""
+    for new_member in message.new_chat_members:
+        if new_member.id == client.me.id:
+            # Bot was added to group
+            welcome_text = """
+🎉 <b>Thanks for adding me to this group!</b>
+
+I'm AutoFilter Bot, your file search assistant.
+
+<b>🚀 What I can do:</b>
+• 🔍 Search and find files instantly
+• 📁 Index files automatically
+• 👑 Admin controls for group management
+• 🎯 Inline search mode
+
+<b>📋 Admin Commands:</b>
+• Add files to index them automatically
+• Use /status to see bot statistics
+• Manage users with ban/unban commands
+
+<b>💡 For Users:</b>
+• Use @{bot_username} <i>query</i> to search files
+• Get help with /help command
+
+Let's make file sharing easier! 🚀
+            """.format(bot_username=client.me.username)
+            
+            await message.reply(welcome_text)
+            
+            # Add group to database
+            try:
+                await groups_collection.update_one(
+                    {"group_id": message.chat.id},
+                    {
+                        "$set": {
+                            "group_id": message.chat.id,
+                            "group_title": message.chat.title,
+                            "added_at": datetime.now(),
+                            "added_by": message.from_user.id
+                        }
+                    },
+                    upsert=True
                 )
-                
-                # Auto-delete time changed to 5 minutes (300 seconds)
-                warning_text = (
-                    "⚠️ **Important Notice:**\n"
-                    "Due to copyright issues, this file will be **automatically deleted after 5 minutes (300 seconds)**.\n"
-                    "📥 Please **forward this file** to your Saved Messages or personal channel immediately!\n\n"
-                    "👑 **Developer:** `Risham004`"
-                )
-                warning_msg = await main_bot.send_message(target_chat, warning_text)
-
-                async def auto_delete_files(file_msg, warn_msg):
-                    await asyncio.sleep(300)
-                    try: await file_msg.delete()
-                    except: pass
-                    try: await warn_msg.delete()
-                    except: pass
-
-                asyncio.create_task(auto_delete_files(sent_file, warning_msg))
-
-                # Delete the search inline button message after sending the file
-                try:
-                    if not is_pm:
-                        await callback_query.message.delete()
-                except:
-                    pass
-
             except Exception as e:
-                print(f"Send Error: {e}")
-                try:
-                    await client.send_message(target_chat, "❌ Failed to send file. Make sure you started the bot in PM.")
-                except: pass
+                logger.error(f"Error adding group {message.chat.id}: {e}")
+        
+        else:
+            # New user joined
+            welcome_text = f"""
+👋 <b>Welcome to the group, {new_member.first_name}!</b>
 
-    Thread(target=run_flask, daemon=True).start()
+🎬 I'm AutoFilter Bot, your file search assistant.
 
-    await userbot.start()
-    await main_bot.start()
-    print("🚀 Premium Movie Bot & Web Server successfully running!")
+<b>🔍 Quick Start:</b>
+• Use @{client.me.username} <i>movie name</i> to search files
+• Get help with /help command
+• Use /start for more options
 
-    await asyncio.Event().wait()
+Enjoy your stay! 🚀
+            """
+            
+            await message.reply(welcome_text)
+
+# Error handlers
+@app.on_message(filters.all)
+async def error_handler(client: Client, message: Message):
+    """Handle errors and unknown commands"""
+    try:
+        # Check if user is banned
+        if await is_banned(message.from_user.id):
+            return
+        
+        # Add user to database
+        await add_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.first_name
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in error_handler: {e}")
+
+# Startup event
+@app.on_ready()
+async def startup_handler():
+    """Handle bot startup"""
+    logger.info("🚀 AutoFilter Bot is starting...")
+    logger.info(f"Bot username: @{app.me.username}")
+    logger.info(f"Bot ID: {app.me.id}")
+    logger.info(f"Owner ID: {OWNER_ID}")
+    logger.info("✅ Bot started successfully!")
+
+# Shutdown event
+@app.on_disconnect()
+async def shutdown_handler():
+    """Handle bot shutdown"""
+    logger.info("🛑 AutoFilter Bot is shutting down...")
+    logger.info("✅ Bot stopped successfully!")
+
+# Main function
+async def main():
+    """Main function to run the bot"""
+    try:
+        logger.info("Starting AutoFilter Bot...")
+        await app.start()
+        logger.info("Bot started successfully!")
+        
+        # Keep the bot running
+        await app.idle()
+        
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+    finally:
+        await app.stop()
+        logger.info("Bot stopped")
 
 if __name__ == "__main__":
+    # Run the bot
     asyncio.run(main())
