@@ -2,7 +2,7 @@
 """
 Professional Telegram AutoFilter Bot
 A complete bot with MongoDB integration, admin controls, and file management
-Built with Pyrogram for maximum performance and reliability
+Built with Hydrogram for maximum performance and reliability (Python 3.14 Compatible)
 """
 
 import os
@@ -14,13 +14,13 @@ from typing import List, Dict, Any, Optional
 import re
 import random
 
-from pyrogram import Client, filters, enums
-from pyrogram.types import (
+from hydrogram import Client, filters, enums
+from hydrogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent,
     CallbackQuery, User
 )
-from pyrogram.errors import (
+from hydrogram.errors import (
     FloodWait, UserNotParticipant, ChatAdminRequired,
     PeerIdInvalid, UserBannedInChannel, MessageNotModified
 )
@@ -55,7 +55,7 @@ if not all([API_ID, API_HASH, BOT_TOKEN, MONGO_URI, OWNER_ID]):
     logger.error("Missing required configuration!")
     exit(1)
 
-# Initialize Pyrogram client
+# Initialize Hydrogram client
 app = Client(
     "AutoFilterBot",
     api_id=API_ID,
@@ -200,10 +200,8 @@ class FileDocument:
     async def search_files(query: str, limit: int = 10) -> List[Dict]:
         """Search files by name or caption"""
         try:
-            # Create text index if it doesn't exist
             await files_collection.create_index([("file_name", "text"), ("caption", "text")])
             
-            # Search with regex for better matching
             regex_query = {"$regex": query, "$options": "i"}
             cursor = files_collection.find({
                 "$or": [
@@ -229,12 +227,10 @@ async def start_command(client: Client, message: Message):
     username = message.from_user.username
     first_name = message.from_user.first_name
     
-    # Check if user is banned
     if await is_banned(user_id):
         await message.reply("❌ You are banned from using this bot.")
         return
     
-    # Check if user is subscribed to required channel
     if not await check_user_subscription(user_id):
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}")],
@@ -250,10 +246,8 @@ async def start_command(client: Client, message: Message):
         )
         return
     
-    # Add user to database
     await add_user(user_id, username, first_name)
     
-    # Welcome message with buttons
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔍 Search Files", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help"),
@@ -341,18 +335,6 @@ async def about_command(client: Client, message: Message):
 • 📢 Broadcast system
 • 🎯 Inline search mode
 
-<b>⚡ Performance:</b>
-• Fast async operations
-• Optimized database queries
-• Efficient file indexing
-• Scalable architecture
-
-<b>🛠️ Built with:</b>
-• Python 3.8+
-• Pyrogram
-• MongoDB
-• Motor (async MongoDB driver)
-
 <b>👨‍💻 Developer:</b> Professional Bot Developer
     """
     
@@ -392,7 +374,6 @@ async def id_command(client: Client, message: Message):
     
     await message.reply(id_text)
 
-# Admin commands
 @app.on_message(filters.command("ban") & filters.user(OWNER_ID))
 async def ban_command(client: Client, message: Message):
     """Handle /ban command (Owner only)"""
@@ -408,7 +389,6 @@ async def ban_command(client: Client, message: Message):
         return
     
     try:
-        # Add to banned collection
         await banned_collection.insert_one({
             "user_id": user_id,
             "username": user_to_ban.username,
@@ -418,13 +398,10 @@ async def ban_command(client: Client, message: Message):
         })
         
         await message.reply(f"✅ User {user_to_ban.first_name} (ID: {user_id}) has been banned.")
-        logger.info(f"User {user_id} banned by {message.from_user.id}")
-        
     except DuplicateKeyError:
         await message.reply("❌ User is already banned.")
     except Exception as e:
         await message.reply(f"❌ Error banning user: {e}")
-        logger.error(f"Error banning user {user_id}: {e}")
 
 @app.on_message(filters.command("unban") & filters.user(OWNER_ID))
 async def unban_command(client: Client, message: Message):
@@ -438,16 +415,12 @@ async def unban_command(client: Client, message: Message):
     
     try:
         result = await banned_collection.delete_one({"user_id": user_id})
-        
         if result.deleted_count > 0:
             await message.reply(f"✅ User {user_to_unban.first_name} (ID: {user_id}) has been unbanned.")
-            logger.info(f"User {user_id} unbanned by {message.from_user.id}")
         else:
             await message.reply("❌ User is not banned.")
-            
     except Exception as e:
         await message.reply(f"❌ Error unbanning user: {e}")
-        logger.error(f"Error unbanning user {user_id}: {e}")
 
 @app.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
 async def broadcast_command(client: Client, message: Message):
@@ -472,18 +445,12 @@ async def broadcast_command(client: Client, message: Message):
     async for user_doc in users_cursor:
         try:
             user_id = user_doc["user_id"]
-            
-            # Skip if user is banned
             if await is_banned(user_id):
                 continue
             
-            # Forward the message
             await broadcast_message.forward(user_id)
             success_count += 1
-            
-            # Small delay to avoid rate limiting
             await asyncio.sleep(0.1)
-            
         except FloodWait as e:
             await asyncio.sleep(e.value)
             try:
@@ -491,9 +458,8 @@ async def broadcast_command(client: Client, message: Message):
                 success_count += 1
             except:
                 failed_count += 1
-        except Exception as e:
+        except Exception:
             failed_count += 1
-            logger.error(f"Error broadcasting to user {user_doc['user_id']}: {e}")
     
     await message.reply(
         f"📢 Broadcast completed!\n"
@@ -510,7 +476,6 @@ async def status_command(client: Client, message: Message):
     file_count = await get_file_count()
     banned_count = await get_banned_count()
     
-    # Get system info
     import psutil
     cpu_percent = psutil.cpu_percent()
     memory = psutil.virtual_memory()
@@ -526,22 +491,14 @@ async def status_command(client: Client, message: Message):
 
 <b>💻 System Resources:</b>
 • <b>CPU Usage:</b> {cpu_percent}%
-• <b>Memory Usage:</b> {memory.percent}% ({memory.used // (1024**3)}GB / {memory.total // (1024**3)}GB)
-• <b>Disk Usage:</b> {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)
+• <b>Memory Usage:</b> {memory.percent}%
+• <b>Disk Usage:</b> {disk.percent}%
 
 <b>🔧 Bot Configuration:</b>
 • <b>API ID:</b> {API_ID}
 • <b>Bot Username:</b> @{client.me.username}
 • <b>Owner ID:</b> {OWNER_ID}
 • <b>Database:</b> {DB_NAME} ✅
-• <b>Required Channel:</b> {REQUIRED_CHANNEL}
-• <b>Source Channels:</b> {len(SOURCE_CHANNEL_IDS)} configured
-• <b>Branding:</b> {BRANDING_TAG[:30]}...
-
-<b>📈 Performance:</b>
-• <b>Response Time:</b> < 1s
-• <b>Database:</b> Optimized
-• <b>Memory:</b> Efficient
     """
     
     await message.reply(status_text)
@@ -553,14 +510,6 @@ async def send_file_command(client: Client, message: Message):
         await message.reply("❌ Please reply to a file to send it.")
         return
     
-    if not message.reply_to_message.document and not message.reply_to_message.video and not message.reply_to_message.audio and not message.reply_to_message.photo:
-        await message.reply("❌ Please reply to a file (document, video, audio, or photo).")
-        return
-    
-    # Get the file
-    file_message = message.reply_to_message
-    
-    # Get target user ID from command arguments
     try:
         target_user_id = int(message.text.split()[1])
     except (IndexError, ValueError):
@@ -568,20 +517,14 @@ async def send_file_command(client: Client, message: Message):
         return
     
     try:
-        # Send the file to the user
-        await file_message.forward(target_user_id)
+        await message.reply_to_message.forward(target_user_id)
         await message.reply(f"✅ File sent successfully to user {target_user_id}")
-        logger.info(f"File sent to user {target_user_id} by {message.from_user.id}")
-        
     except Exception as e:
         await message.reply(f"❌ Error sending file: {e}")
-        logger.error(f"Error sending file to user {target_user_id}: {e}")
 
-# File indexing and management
 @app.on_message(filters.document | filters.video | filters.audio | filters.photo)
 async def index_file(client: Client, message: Message):
     """Index files automatically from source channels or admin uploads"""
-    # Check if message is from source channel or user is admin
     is_from_source = message.chat.id in SOURCE_CHANNEL_IDS
     is_admin_upload = await is_admin(message.from_user.id, message.chat.id)
     
@@ -589,7 +532,6 @@ async def index_file(client: Client, message: Message):
         return
     
     try:
-        # Get file information
         if message.document:
             file_id = message.document.file_id
             file_name = message.document.file_name or "Unknown Document"
@@ -613,12 +555,10 @@ async def index_file(client: Client, message: Message):
         else:
             return
         
-        # Add branding to caption
         caption = message.caption or ""
         if BRANDING_TAG and BRANDING_TAG not in caption:
             caption = f"{caption}\n\n{BRANDING_TAG}" if caption else BRANDING_TAG
         
-        # Create file document
         file_doc = FileDocument(
             file_id=file_id,
             file_name=file_name,
@@ -628,28 +568,19 @@ async def index_file(client: Client, message: Message):
             group_id=message.chat.id
         )
         
-        # Save to database
-        if await file_doc.save():
-            logger.info(f"Indexed file: {file_name} from {'source channel' if is_from_source else 'admin upload'}")
-        else:
-            logger.error(f"Failed to index file: {file_name}")
-            
+        await file_doc.save()
     except Exception as e:
         logger.error(f"Error indexing file: {e}")
 
-# Inline query handler
 @app.on_inline_query()
 async def inline_query_handler(client: Client, query: InlineQuery):
     """Handle inline queries for file search"""
     user_id = query.from_user.id
     
-    # Check if user is banned
     if await is_banned(user_id):
         return
     
-    # Check if user is subscribed to required channel
     if not await check_user_subscription(user_id):
-        # Show subscription required message
         results = [
             InlineQueryResultArticle(
                 title="❌ Subscription Required",
@@ -664,20 +595,15 @@ async def inline_query_handler(client: Client, query: InlineQuery):
         await query.answer(results, cache_time=300)
         return
     
-    # Add user to database
     await add_user(user_id, query.from_user.username, query.from_user.first_name)
-    
     query_text = query.query.strip()
     
     if not query_text:
-        # Show recent files if no query
         files = await FileDocument.search_files("", limit=10)
     else:
-        # Search files
         files = await FileDocument.search_files(query_text, limit=20)
     
     if not files:
-        # No results found
         results = [
             InlineQueryResultArticle(
                 title="❌ No files found",
@@ -690,72 +616,26 @@ async def inline_query_handler(client: Client, query: InlineQuery):
     else:
         results = []
         for file_doc in files:
-            # Create result based on file type
-            if file_doc["file_type"] == "video":
-                results.append(
-                    InlineQueryResultArticle(
-                        title=f"🎬 {file_doc['file_name']}",
-                        description=f"Video • {file_doc['file_size'] // (1024*1024)}MB",
-                        input_message_content=InputTextMessageContent(
-                            f"🎬 <b>{file_doc['file_name']}</b>\n\n"
-                            f"📁 Type: Video\n"
-                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
-                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
-                        ),
-                        thumb_url="https://img.icons8.com/color/48/000000/video.png"
+            results.append(
+                InlineQueryResultArticle(
+                    title=f"📁 {file_doc['file_name']}",
+                    description=f"Type: {file_doc['file_type'].title()} • {file_doc['file_size'] // (1024*1024)}MB",
+                    input_message_content=InputTextMessageContent(
+                        f"📁 <b>{file_doc['file_name']}</b>\n\n"
+                        f"📁 Type: {file_doc['file_type'].title()}\n"
+                        f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
+                        f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
                     )
                 )
-            elif file_doc["file_type"] == "audio":
-                results.append(
-                    InlineQueryResultArticle(
-                        title=f"🎵 {file_doc['file_name']}",
-                        description=f"Audio • {file_doc['file_size'] // (1024*1024)}MB",
-                        input_message_content=InputTextMessageContent(
-                            f"🎵 <b>{file_doc['file_name']}</b>\n\n"
-                            f"📁 Type: Audio\n"
-                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
-                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
-                        ),
-                        thumb_url="https://img.icons8.com/color/48/000000/audio.png"
-                    )
-                )
-            elif file_doc["file_type"] == "document":
-                results.append(
-                    InlineQueryResultArticle(
-                        title=f"📄 {file_doc['file_name']}",
-                        description=f"Document • {file_doc['file_size'] // (1024*1024)}MB",
-                        input_message_content=InputTextMessageContent(
-                            f"📄 <b>{file_doc['file_name']}</b>\n\n"
-                            f"📁 Type: Document\n"
-                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
-                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
-                        ),
-                        thumb_url="https://img.icons8.com/color/48/000000/document.png"
-                    )
-                )
-            else:
-                results.append(
-                    InlineQueryResultArticle(
-                        title=f"📁 {file_doc['file_name']}",
-                        description=f"File • {file_doc['file_size'] // (1024*1024)}MB",
-                        input_message_content=InputTextMessageContent(
-                            f"📁 <b>{file_doc['file_name']}</b>\n\n"
-                            f"📁 Type: {file_doc['file_type'].title()}\n"
-                            f"📊 Size: {file_doc['file_size'] // (1024*1024)}MB\n"
-                            f"📅 Added: {file_doc['added_at'].strftime('%Y-%m-%d')}"
-                        )
-                    )
-                )
+            )
     
     await query.answer(results, cache_time=300)
 
-# Callback query handler
 @app.on_callback_query()
 async def callback_query_handler(client: Client, callback_query: CallbackQuery):
     """Handle callback queries"""
     user_id = callback_query.from_user.id
     
-    # Check if user is banned
     if await is_banned(user_id):
         await callback_query.answer("❌ You are banned from using this bot.", show_alert=True)
         return
@@ -763,78 +643,21 @@ async def callback_query_handler(client: Client, callback_query: CallbackQuery):
     data = callback_query.data
     
     if data == "help":
-        help_text = """
-📖 <b>AutoFilter Bot Help</b>
-
-<b>🔍 How to Search:</b>
-• Use the search button in /start
-• Type @{bot_username} <i>query</i> in any chat
-• Use inline mode for quick access
-
-<b>📋 Commands:</b>
-/start - Start the bot and see welcome message
-/help - Show this help message
-/about - Show bot information
-/id - Get your user ID or replied user's ID
-
-<b>💡 Tips:</b>
-• Search with keywords from movie/series names
-• Use partial names for better results
-• Check file size before downloading
-        """.format(bot_username=client.me.username)
-        
+        help_text = "📖 <b>AutoFilter Bot Help</b>\n\nUse @{} query in any chat to search files.".format(client.me.username)
         await callback_query.edit_message_text(help_text)
-        
     elif data == "about":
-        uptime = await get_uptime()
-        user_count = await get_user_count()
-        file_count = await get_file_count()
-        
-        about_text = f"""
-🤖 <b>AutoFilter Bot Information</b>
-
-<b>📊 Statistics:</b>
-• <b>Uptime:</b> {uptime}
-• <b>Total Users:</b> {user_count:,}
-• <b>Total Files:</b> {file_count:,}
-• <b>Version:</b> 2.0
-
-<b>🔧 Features:</b>
-• 🔍 Instant file search
-• 📁 MongoDB database storage
-• 👑 Admin controls
-• 🚫 User management
-• 📢 Broadcast system
-• 🎯 Inline search mode
-        """
-        
+        about_text = "🤖 <b>AutoFilter Bot Information</b>\n\nBuilt with Hydrogram & MongoDB."
         await callback_query.edit_message_text(about_text)
-        
     elif data == "get_id":
-        id_text = f"""
-🆔 <b>Your Information</b>
-
-<b>👤 Name:</b> {callback_query.from_user.first_name}
-<b>🆔 User ID:</b> <code>{callback_query.from_user.id}</code>
-<b>📝 Username:</b> @{callback_query.from_user.username or 'No username'}
-        """
-        
+        id_text = f"🆔 <b>Your ID:</b> <code>{callback_query.from_user.id}</code>"
         await callback_query.edit_message_text(id_text)
-    
     elif data == "check_sub":
-        # Check subscription status
         if await check_user_subscription(callback_query.from_user.id):
-            await callback_query.edit_message_text(
-                "✅ <b>Subscription Verified!</b>\n\n"
-                "You are now subscribed to our channel. You can use the bot normally.\n\n"
-                "Use /start to see the main menu."
-            )
+            await callback_query.edit_message_text("✅ <b>Subscription Verified!</b>\n\nUse /start to begin.")
         else:
             await callback_query.edit_message_text(
                 f"❌ <b>Subscription Not Found!</b>\n\n"
-                f"Please join our channel first:\n"
-                f"📢 <a href='https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}'>Join Channel</a>\n\n"
-                f"After joining, click the button below to verify your subscription.",
+                f"Please join our channel first: <a href='https://t.me/{REQUIRED_CHANNEL.replace('@', '').replace('-100', '')}'>Join Channel</a>",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔄 Check Again", callback_data="check_sub")]
                 ])
@@ -842,119 +665,19 @@ async def callback_query_handler(client: Client, callback_query: CallbackQuery):
     
     await callback_query.answer()
 
-# Welcome message for new group members
 @app.on_message(filters.new_chat_members)
 async def welcome_new_members(client: Client, message: Message):
-    """Welcome new group members"""
     for new_member in message.new_chat_members:
         if new_member.id == client.me.id:
-            # Bot was added to group
-            welcome_text = """
-🎉 <b>Thanks for adding me to this group!</b>
-
-I'm AutoFilter Bot, your file search assistant.
-
-<b>🚀 What I can do:</b>
-• 🔍 Search and find files instantly
-• 📁 Index files automatically
-• 👑 Admin controls for group management
-• 🎯 Inline search mode
-
-<b>📋 Admin Commands:</b>
-• Add files to index them automatically
-• Use /status to see bot statistics
-• Manage users with ban/unban commands
-
-<b>💡 For Users:</b>
-• Use @{bot_username} <i>query</i> to search files
-• Get help with /help command
-
-Let's make file sharing easier! 🚀
-            """.format(bot_username=client.me.username)
-            
-            await message.reply(welcome_text)
-            
-            # Add group to database
-            try:
-                await groups_collection.update_one(
-                    {"group_id": message.chat.id},
-                    {
-                        "$set": {
-                            "group_id": message.chat.id,
-                            "group_title": message.chat.title,
-                            "added_at": datetime.now(),
-                            "added_by": message.from_user.id
-                        }
-                    },
-                    upsert=True
-                )
-            except Exception as e:
-                logger.error(f"Error adding group {message.chat.id}: {e}")
-        
-        else:
-            # New user joined
-            welcome_text = f"""
-👋 <b>Welcome to the group, {new_member.first_name}!</b>
-
-🎬 I'm AutoFilter Bot, your file search assistant.
-
-<b>🔍 Quick Start:</b>
-• Use @{client.me.username} <i>movie name</i> to search files
-• Get help with /help command
-• Use /start for more options
-
-Enjoy your stay! 🚀
-            """
-            
-            await message.reply(welcome_text)
-
-# Error handlers
-@app.on_message(filters.all)
-async def error_handler(client: Client, message: Message):
-    """Handle errors and unknown commands"""
-    try:
-        # Check if user is banned
-        if await is_banned(message.from_user.id):
-            return
-        
-        # Add user to database
-        await add_user(
-            message.from_user.id,
-            message.from_user.username,
-            message.from_user.first_name
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in error_handler: {e}")
-
-# Startup event
-@app.on_ready()
-async def startup_handler():
-    """Handle bot startup"""
-    logger.info("🚀 AutoFilter Bot is starting...")
-    logger.info(f"Bot username: @{app.me.username}")
-    logger.info(f"Bot ID: {app.me.id}")
-    logger.info(f"Owner ID: {OWNER_ID}")
-    logger.info("✅ Bot started successfully!")
-
-# Shutdown event
-@app.on_disconnect()
-async def shutdown_handler():
-    """Handle bot shutdown"""
-    logger.info("🛑 AutoFilter Bot is shutting down...")
-    logger.info("✅ Bot stopped successfully!")
+            await message.reply("🎉 Thanks for adding me! I am ready to filter and search files.")
 
 # Main function
 async def main():
-    """Main function to run the bot"""
     try:
-        logger.info("Starting AutoFilter Bot...")
+        logger.info("Starting AutoFilter Bot with Hydrogram...")
         await app.start()
         logger.info("Bot started successfully!")
-        
-        # Keep the bot running
         await app.idle()
-        
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
@@ -964,5 +687,4 @@ async def main():
         logger.info("Bot stopped")
 
 if __name__ == "__main__":
-    # Run the bot
     asyncio.run(main())
