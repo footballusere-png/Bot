@@ -9,7 +9,7 @@ from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message,
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FORCE_CHANNEL, ADMINS
 import database as db
 
-# എറർ ഡെബഗ്ഗിംഗിനായി സേഫ് ആയ ഹാൻഡ്‌ലർ
+# എറർ ഡെബഗ്ഗിംഗിനായി
 def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -18,13 +18,6 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
 
 sys.excepthook = handle_exception
-
-# ഇവന്റ് ലൂപ്പ് എറർ ഒഴിവാക്കാൻ ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
 bot = Client(
     "FileSearchBot", 
@@ -177,7 +170,7 @@ async def total_users_cmd(client, message: Message):
 
 @bot.on_message(filters.command("daily_status"))
 async def daily_status_cmd(client, message: Message):
-    users = above_count = await db.total_users_count()
+    users = await db.total_users_count()
     await message.reply_text(f"📈 **Daily Status:**\nആകെ യൂസേഴ്സ്: {users}")
 
 @bot.on_message(filters.command("daily_searches"))
