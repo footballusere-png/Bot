@@ -1,9 +1,14 @@
 # userbot.py
 import re
 from pyrogram import Client, filters
-from config import API_ID, API_HASH, DB_CHANNEL, SOURCE_CHANNELS
+from config import API_ID, API_HASH, DB_CHANNEL, SOURCE_CHANNELS, STRING_SESSION
 
-app = Client("my_userbot", api_id=API_ID, api_hash=API_HASH)
+app = Client(
+    "my_userbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=STRING_SESSION
+)
 
 @app.on_message(filters.chat(SOURCE_CHANNELS) & (filters.document | filters.video | filters.audio))
 async def forward_files(client, message):
@@ -18,12 +23,10 @@ async def forward_files(client, message):
         media = message.document or message.video or message.audio
         file_name = media.file_name if hasattr(media, "file_name") else "Media File"
         
-        # ഫയൽ ഡാറ്റാബേസ് ചാനലിലേക്ക് അയക്കുന്നു
         await message.copy(
             chat_id=DB_CHANNEL,
             caption=f"📁 {file_name}\n\n{cleaned_caption}"
         )
-        
     except Exception as e:
         print(f"Error forwarding file: {e}")
 
