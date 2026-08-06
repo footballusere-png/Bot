@@ -1,4 +1,6 @@
-pyrogram
+hydrogram
 tgcrypto
 motor
 dnspython
+pyaes
+pysocks
