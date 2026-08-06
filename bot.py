@@ -1,7 +1,7 @@
 # bot.py
 import re
 import asyncio
-from bson.ObjectId import ObjectId
+from bson import ObjectId
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FORCE_CHANNEL, ADMINS
