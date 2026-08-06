@@ -142,7 +142,7 @@ async def bot_states_handler(client, message: Message):
 
 # Public Commands
 @bot.on_message(filters.command("total_files"))
-async def total_files_cmd(file_client, message: Message):
+async def total_files_cmd(client, message: Message):
     count = await db.total_files_count()
     await message.reply_text(f"📁 ഡാറ്റാബേസിൽ ആകെ ഉള്ള ഫയലുകൾ: **{count}**")
 
