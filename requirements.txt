@@ -1,6 +1,4 @@
-hydrogram
+pyrogram
 tgcrypto
-aiosqlite
-pyaes
-pysocks
-flask
+motor
+dnspython
