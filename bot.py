@@ -1,14 +1,35 @@
-import os
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, db
 import telebot
 
-# 1. Firebase കോൺഫിഗറേഷൻ
-# നിങ്ങളുടെ ഫയർബേസ് പ്രോജക്റ്റിന്റെ ഡാറ്റാബേസ് യു.ആർ.എൽ ഇവിടെ നൽകുക (ഉദാഹരണത്തിന്: https://your-app-default-rtdb.firebaseio.com/)
-cred = credentials.Certificate("serviceAccountKey.json")
+# 1. Firebase Admin Credentials (നിങ്ങളുടെ വെബ് കോൺഫിഗറേഷനിൽ നിന്നുള്ള പ്രോജക്റ്റ് ഐഡിയും യു.ആർ.എല്ലും)
+# ശ്രദ്ധിക്കുക: പൈത്തൺ ബാക്ക്എൻഡിന് 'serviceAccountKey.json' ഫയലിലെ പ്രൈവറ്റ് കീ ആവശ്യമാണ്.
+# താഴെ കൊടുത്ത ഡിക്ഷ്ണറിയിൽ നിങ്ങളുടെ ഫയർബേസ് കൺസോളിൽ നിന്ന് ലഭിച്ച സർവീസ് അക്കൗണ്ട് കീ വിവരങ്ങൾ നൽകുക.
+firebase_key_data = {
+    "type": "service_account",
+    "project_id": "a-one-chat-e3642",
+    "private_key_id": "YOUR_PRIVATE_KEY_ID",  # Firebase Console -> Project Settings -> Service Accounts ൽ നിന്ന് എടുക്കുക
+    "private_key": "-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----",
+    "client_email": "firebase-adminsdk-xxxxx@a-one-chat-e3642.iam.gserviceaccount.com",
+    "client_id": "YOUR_CLIENT_ID",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": (
+        "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-xxxxx%45a-one-chat-e3642.iam.gserviceaccount.com"
+    ),
+}
+
+# ഫയർബേസ് ഇനിഷ്യലൈസ് ചെയ്യുന്നു
+cred = credentials.Certificate(firebase_key_data)
 firebase_admin.initialize_app(
-    cred, {"databaseURL": "https://YOUR_FIREBASE_DB_URL.firebaseio.com/"}
+    cred,
+    {
+        "databaseURL": (
+            "https://a-one-chat-e3642-default-rtdb.firebaseio.com"
+        )
+    },
 )
 
 # 2. ടെലഗ്രാം ബോട്ട് ടോക്കൺ
