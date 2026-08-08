@@ -1,6 +1,3 @@
-hydrogram
-tgcrypto
-motor
-dnspython
-pyaes
-pysocks
+python-telegram-bot
+requests
+apscheduler
