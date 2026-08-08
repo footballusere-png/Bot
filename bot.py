@@ -13,7 +13,7 @@ CHANNEL_USERNAME = "@mfottupdates"
 # Database to store user IDs for broadcasting
 USER_DATABASE = set()
 
-# TMDB Movie Search Function with Image Support
+# TMDB Movie Search Function with Attribution & Images
 def search_movie(movie_name):
     url = f"https://api.themoviedb.org/3/search/movie?query={encode_query(movie_name)}&language=en-US&page=1"
     headers = {
@@ -42,7 +42,8 @@ def search_movie(movie_name):
                 f"⭐ **IMDb Rating:** `{vote_average} / 10`\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📖 **Overview:**\n_{overview}_\n\n"
-                f"🤖 *Powered by @mfottupdates*"
+                f"🔗 *Data source: The Movie Database (TMDB)*\n"
+                f"🤖 *Powered by {CHANNEL_USERNAME}*"
             )
             return caption, poster_url
     return None, None
@@ -50,7 +51,7 @@ def search_movie(movie_name):
 def encode_query(text):
     return requests.utils.quote(text)
 
-# Live Auto Updates for Channel and Group (No Force Join Required)
+# Live Auto Updates for Channel and Group with Attribution
 async def post_live_movie_updates(context: ContextTypes.DEFAULT_TYPE):
     url = "https://api.themoviedb.org/3/movie/upcoming?language=en-US&page=1"
     headers = {
@@ -77,7 +78,8 @@ async def post_live_movie_updates(context: ContextTypes.DEFAULT_TYPE):
                 f"📅 **Release Date:** `{release_date}`\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📖 _{overview}_\n\n"
-                f"🔔 *Stay tuned to {CHANNEL_USERNAME} for more OTT & Movie updates!*"
+                f"🔗 *Data source: The Movie Database (TMDB)*\n"
+                f"🔔 *Stay tuned to {CHANNEL_USERNAME} for more updates!*"
             )
             
             try:
@@ -102,7 +104,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_msg, parse_mode="Markdown")
 
-# Handle User Queries (Force Join Applied only for user search)
+# Handle User Queries (Force Join Applied)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.effective_message
@@ -180,7 +182,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("🤖 Professional Live Movie Bot is running successfully...")
+    print("🤖 Professional Live Movie Bot with TMDB Attribution is running...")
     app.run_polling()
 
 if __name__ == "__main__":
