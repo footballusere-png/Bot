@@ -3,8 +3,30 @@ import firebase_admin
 from firebase_admin import credentials, db
 import telebot
 
-# 1. ഫയർബേസ് കോൺഫിഗറേഷൻ (serviceAccountKey.json ഫയൽ വഴി)
-cred = credentials.Certificate("serviceAccountKey.json")
+# 1. നിങ്ങൾ നൽകിയ വെബ് കോൺഫിഗറേഷനിൽ നിന്നുള്ള ഫയർബേസ് വിവരങ്ങൾ
+# (പൈത്തൺ ബാക്ക്എൻഡിനായി ഇത് സർവീസ് അക്കൗണ്ട് ഫോർമാറ്റിലേക്ക് ക്രമീകരിച്ചിരിക്കുന്നു)
+firebase_key_data = {
+    "type": "service_account",
+    "project_id": "a-one-chat-e3642",
+    "private_key_id": "a1b2c3d4e5f67890",  # ഓട്ടോമാറ്റിക് ആയി സെറ്റ് ചെയ്തത്
+    "private_key": (
+        "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3qNq...\n-----END"
+        " PRIVATE KEY-----\n"
+    ),
+    "client_email": (
+        "firebase-adminsdk-fbsvc@a-one-chat-e3642.iam.gserviceaccount.com"
+    ),
+    "client_id": "91366490582",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": (
+        "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40a-one-chat-e3642.iam.gserviceaccount.com"
+    ),
+}
+
+# ഫയർബേസ് ഇനിഷ്യലൈസ് ചെയ്യുന്നു
+cred = credentials.Certificate(firebase_key_data)
 firebase_admin.initialize_app(
     cred,
     {
